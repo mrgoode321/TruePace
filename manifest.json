@@ -1,0 +1,19 @@
+{
+  "name": "True Pace",
+  "short_name": "True Pace",
+  "description": "Adjusted running pace for grade, heat, altitude, wind and air quality.",
+  "display": "standalone",
+  "orientation": "portrait",
+  "start_url": "./index.html",
+  "scope": "./",
+  "background_color": "#0F1720",
+  "theme_color": "#0F1720",
+  "icons": [
+    {
+      "src": "./icon.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

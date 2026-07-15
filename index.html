@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+<title>True Pace</title>
+
+<!-- iOS "Add to Home Screen" support -->
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="True Pace" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="theme-color" content="#0F1720" />
+<link rel="apple-touch-icon" sizes="180x180" href="./icon.png" />
+<link rel="icon" href="./icon.png" />
+<link rel="manifest" href="./manifest.json" />
+
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+:root {
+  --bg:#0F1720; --surface:#1A2530; --surface-2:#212D3A;
+  --text:#EDEAE2; --text-dim:#8B98A5;
+  --contour:#6B8F6E; --heat:#E2984A; --altitude:#9B87C4; --wind:#5AACC7; --aqi:#A08F7A; --ideal:#6FC7B8;
+  --border:rgba(237,234,226,0.1); --error:#D9695F; --estimate:#D9B45F;
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { margin:0; padding:0; background:var(--bg); }
+body {
+  min-height: 100vh; min-height: 100dvh;
+  background: radial-gradient(ellipse 900px 500px at 50% -10%, rgba(107,143,110,0.12), transparent), var(--bg);
+  color: var(--text); font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  padding: max(28px, env(safe-area-inset-top)) 18px max(60px, env(safe-area-inset-bottom));
+  -webkit-font-smoothing: antialiased;
+}
+.shell { max-width: 640px; margin: 0 auto; }
+.eyebrow { font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:.18em; color:var(--contour); text-transform:uppercase; margin-bottom:10px; font-weight:500; }
+h1 { font-size: clamp(24px,6vw,32px); line-height:1.15; margin:0 0 10px; font-weight:600; letter-spacing:-0.01em; }
+.lede { color:var(--text-dim); font-size:15px; line-height:1.55; margin:0 0 28px; max-width:46ch; }
+.icon { display:inline-block; vertical-align:-3px; }
+.upload-zone { border:1.5px dashed var(--border); border-radius:14px; padding:40px 20px; text-align:center; cursor:pointer; transition:border-color .15s ease, background .15s ease; background:var(--surface); }
+.upload-zone:hover, .upload-zone.drag-over { border-color:var(--contour); background:var(--surface-2); }
+.upload-zone:focus-visible { outline:2px solid var(--contour); outline-offset:3px; }
+.upload-title { font-size:16px; font-weight:600; margin-top:14px; }
+.upload-sub { font-size:13px; color:var(--text-dim); margin-top:6px; line-height:1.5; }
+.state-box { border:1px solid var(--border); border-radius:14px; padding:40px 20px; text-align:center; background:var(--surface); }
+.spin { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
+.state-label { font-family:'JetBrains Mono',monospace; font-size:13px; color:var(--text-dim); margin-top:14px; letter-spacing:.02em; }
+.error-title { font-weight:600; margin-top:14px; font-size:16px; }
+.error-detail { color:var(--text-dim); font-size:13px; margin-top:6px; line-height:1.5; }
+button { font: inherit; }
+button.retry { margin-top:20px; background:var(--contour); color:#0F1720; border:none; padding:10px 20px; border-radius:8px; font-family:'Inter',sans-serif; font-weight:600; font-size:13px; cursor:pointer; }
+button.retry:focus-visible { outline:2px solid var(--text); outline-offset:2px; }
+.result-card { border:1px solid var(--border); border-radius:16px; background:var(--surface); overflow:hidden; }
+.hero-pace { padding:30px 24px 22px; text-align:center; border-bottom:1px solid var(--border); }
+.hero-label { font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:.16em; color:var(--ideal); text-transform:uppercase; margin-bottom:10px; }
+.hero-number { font-family:'JetBrains Mono',monospace; font-size:clamp(48px,15vw,72px); font-weight:700; line-height:1; font-variant-numeric:tabular-nums; color:var(--ideal); }
+.hero-unit { font-size:15px; color:var(--text-dim); margin-top:6px; font-family:'JetBrains Mono',monospace; }
+.hero-vs { margin-top:16px; font-size:13px; color:var(--text-dim); font-family:'JetBrains Mono',monospace; line-height:1.6; }
+.hero-vs b { color:var(--text); font-weight:600; }
+.stats-row { display:grid; grid-template-columns:repeat(3,1fr); border-bottom:1px solid var(--border); }
+.stat { padding:16px 10px; text-align:center; border-right:1px solid var(--border); }
+.stat:last-child { border-right:none; }
+.stat-val { font-family:'JetBrains Mono',monospace; font-size:18px; font-weight:600; }
+.stat-key { font-size:10px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.1em; margin-top:4px; font-family:'JetBrains Mono',monospace; }
+.section { padding:20px 24px; border-bottom:1px solid var(--border); }
+.section:last-child { border-bottom:none; }
+.section-title-row { display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; gap:8px; }
+.section-title { font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:.14em; color:var(--text-dim); text-transform:uppercase; }
+.estimate-badge { display:flex; align-items:center; gap:4px; font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:.04em; color:var(--estimate); background:rgba(217,180,95,0.12); padding:3px 8px; border-radius:20px; white-space:nowrap; }
+.factor-row + .factor-row { margin-top:16px; }
+.factor-head { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:6px; gap: 10px; }
+.factor-label { font-family:'JetBrains Mono',monospace; font-size:12px; letter-spacing:.06em; text-transform:uppercase; font-weight:600; white-space:nowrap; }
+.factor-pct { font-family:'JetBrains Mono',monospace; font-size:13px; font-weight:700; white-space:nowrap; }
+.factor-track { height:5px; background:rgba(237,234,226,0.07); border-radius:3px; overflow:hidden; }
+.factor-fill { height:100%; border-radius:3px; transition:width .6s ease; }
+.factor-detail { font-size:12px; color:var(--text-dim); margin-top:6px; line-height:1.5; word-break: break-word; }
+.cond-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:12px; }
+.cond-item { background:var(--surface-2); border-radius:10px; padding:12px 14px; }
+.cond-key { font-size:10px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.08em; font-family:'JetBrains Mono',monospace; }
+.cond-val { font-family:'JetBrains Mono',monospace; font-size:15px; font-weight:600; margin-top:3px; }
+.uv-flag { margin-top:12px; font-size:12px; color:var(--heat); display:flex; align-items:center; gap:6px; }
+.fetch-note { margin-bottom:16px; font-size:12px; color:var(--estimate); line-height:1.6; display:flex; gap:8px; align-items:flex-start; background:rgba(217,180,95,0.08); border:1px solid rgba(217,180,95,0.2); border-radius:10px; padding:11px 12px; }
+.fetch-note svg { flex-shrink:0; margin-top:2px; }
+.fetch-note code { font-family:'JetBrains Mono',monospace; font-size:10px; word-break:break-all; opacity:.8; }
+.input-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:10px; }
+.in-field { display:flex; flex-direction:column; gap:5px; background:var(--surface-2); border-radius:10px; padding:10px 12px; }
+.in-field input { background:transparent; border:none; border-bottom:1px solid var(--border); color:var(--text); font-family:'JetBrains Mono',monospace; font-size:15px; font-weight:600; padding:2px 0; width:100%; }
+.in-field input:focus { outline:none; border-bottom-color:var(--contour); }
+.in-field input:disabled { color:var(--text-dim); }
+.in-field input::placeholder { color:var(--text-dim); font-weight:400; opacity:.55; }
+button.apply-btn { width:100%; background:var(--contour); color:#0F1720; border:none; padding:12px; font-family:'Inter',sans-serif; font-size:13px; font-weight:600; border-radius:10px; cursor:pointer; margin-top:12px; }
+button.apply-btn:focus-visible { outline:2px solid var(--text); outline-offset:2px; }
+.estimate-note { margin-top:12px; font-size:12px; color:var(--estimate); line-height:1.6; display:flex; gap:6px; align-items:flex-start; }
+.note { font-size:12px; color:var(--text-dim); line-height:1.6; margin-top:12px; }
+button.reset-btn { width:100%; background:transparent; border:1px solid var(--border); color:var(--text-dim); padding:13px; font-family:'Inter',sans-serif; font-size:13px; font-weight:500; border-radius:10px; cursor:pointer; margin-top:18px; }
+button.reset-btn:hover { border-color:var(--text-dim); color:var(--text); }
+button.reset-btn:focus-visible { outline:2px solid var(--contour); outline-offset:2px; }
+.footnote { font-size:11px; color:var(--text-dim); text-align:center; margin-top:18px; line-height:1.6; }
+svg.chart { width:100%; height:110px; display:block; }
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="eyebrow">Route Analysis</div>
+  <h1>Strip the conditions out of your pace.</h1>
+  <p class="lede">Upload a run and see the pace you'd have run in ideal conditions — adjusted for hills, heat, altitude, wind, and air quality.</p>
+  <div id="stage"></div>
+  <div class="footnote">Grade &amp; altitude computed from your file · weather auto-fetches via Open-Meteo when self-hosted, manual entry otherwise · runs in your browser, files aren't uploaded anywhere</div>
+</div>
+
+<script>
+'use strict';
+
+/* ============================================================
+   ICONS — small inline SVGs, no icon library dependency
+   ============================================================ */
+const ICONS = {
+  upload: '<path d="M12 3v12m0-12l-4 4m4-4l4 4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/>',
+  loader: '<path d="M12 2a10 10 0 1 0 10 10"/>',
+  alert: '<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>',
+  mountain: '<path d="M8 21l4-7 4 7M3 21l6-11 3 5.5M21 21l-6-11-2.5 4.5"/>',
+  trendUp: '<polyline points="3,17 9,11 13,15 21,7"/><polyline points="14,7 21,7 21,14"/>',
+  wind: '<path d="M3 8h11a3 3 0 1 0-3-3M3 12h15a3 3 0 1 1-3 3M3 16h9a2 2 0 1 1-2 2"/>',
+  droplet: '<path d="M12 2C8 8 5 11.5 5 15a7 7 0 0 0 14 0c0-3.5-3-7-7-13z"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path stroke-linecap="round" d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+  reset: '<path d="M3 12a9 9 0 1 0 2.6-6.4M3 3v6h6"/>',
+  sparkles: '<path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5z"/><path d="M19 15l.7 2.1L22 18l-2.3.9L19 21l-.7-2.1L16 18l2.3-.9z"/>',
+};
+function icon(name, size, color, extraClass) {
+  const cls = 'icon' + (extraClass ? ' ' + extraClass : '');
+  const stroke = color || 'currentColor';
+  return `<svg class="${cls}" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="${stroke}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[name]}</svg>`;
+}
+
+function escapeHtml(s) {
+  if (s == null) return '';
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+/* ============================================================
+   PHYSICS / PHYSIOLOGY
+   ============================================================ */
+function toRad(d) { return (d * Math.PI) / 180; }
+function toDeg(r) { return (r * 180) / Math.PI; }
+
+function haversineMeters(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(Math.min(1, a)));
+}
+function bearingDegrees(lat1, lon1, lat2, lon2) {
+  const y = Math.sin(toRad(lon2 - lon1)) * Math.cos(toRad(lat2));
+  const x = Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) - Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(toRad(lon2 - lon1));
+  return (toDeg(Math.atan2(y, x)) + 360) % 360;
+}
+function gradeCostRatio(gradeDecimal) {
+  const g = Math.max(-0.45, Math.min(0.45, gradeDecimal));
+  const g2 = g * g, g3 = g2 * g, g4 = g3 * g, g5 = g4 * g;
+  const cost = 155.4 * g5 - 30.4 * g4 - 43.3 * g3 + 46.3 * g2 + 19.5 * g + 3.6;
+  return cost / 3.6;
+}
+
+/* ---------------- HEAT: WBGT from temp + humidity ----------------
+   Dew point is gone. It was a decent WBGT proxy in humid climates but it
+   ignores dry-bulb temperature, so it read ~0% penalty for a sunny 79F
+   desert morning at 5,200ft — badly wrong for exactly the conditions this
+   gets used in.
+
+   Vapour pressure and WBGT below are the Australian Bureau of Meteorology
+   approximation, which traces to the American College of Sports Medicine's
+   position stand on preventing thermal injuries during distance running:
+     e    = (RH/100) * 6.105 * exp(17.27*Ta / (237.7+Ta))     [hPa]
+     WBGT = 0.567*Ta + 0.393*e + 3.94                          [deg C]
+
+   Known limits, stated plainly: this form ignores wind and solar radiation
+   and assumes moderately high sun with light wind. BoM's own guidance says
+   it OVERESTIMATES heat stress when cloudy, windy, or early morning with a
+   low sun. It's also documented as systematically biased vs. the Liljegren
+   reference model. It's used here because it's the standard for this exact
+   sport, it needs only the two inputs available, and it beats dew point in
+   dry heat — not because it's exact.
+------------------------------------------------------------------- */
+function vapourPressureHpa(tempC, rh) {
+  const rhClamped = Math.min(100, Math.max(0, rh));
+  return (rhClamped / 100) * 6.105 * Math.exp((17.27 * tempC) / (237.7 + tempC));
+}
+function wbgtApproxC(tempC, rh) {
+  return 0.567 * tempC + 0.393 * vapourPressureHpa(tempC, rh) + 3.94;
+}
+
+// Ely et al. 2007 (Med Sci Sports Exerc 39:487-93) binned marathons into
+// WBGT quartiles (Q1 5.1-10C ... Q4 20.1-25C). Top males ran 1.7 / 2.5 /
+// 3.3 / 4.5% off course record across those quartiles -> the marginal cost
+// for elites is ~0.9% per 5C. The paper's core finding is that slower
+// runners lose more, so sensitivity is scaled by the runner's own pace.
+//
+// HONESTY ABOUT THE TAIL: Ely's slowest studied group was around a 3:00
+// marathon (~6:52/mi). The 9:00/mi entry is an extrapolation past the data,
+// not a measured value. Treat the slow end as an estimate.
+const WBGT_THRESHOLD_C = 10; // top of Ely's best quartile; no penalty below
+const PACE_SENSITIVITY = [
+  [300, 0.9],  // 5:00/mi - Ely's top finishers, measured
+  [412, 2.0],  // ~6:52/mi - edge of Ely's data
+  [540, 3.2],  // 9:00/mi - extrapolated
+  [720, 3.2],  // 12:00/mi - clamped, no data out here
+];
+function heatSensitivityPer5C(paceSecPerMile) {
+  if (paceSecPerMile == null || isNaN(paceSecPerMile) || paceSecPerMile <= 0) return 2.0;
+  const t = PACE_SENSITIVITY;
+  if (paceSecPerMile <= t[0][0]) return t[0][1];
+  const last = t[t.length - 1];
+  if (paceSecPerMile >= last[0]) return last[1];
+  for (let i = 0; i < t.length - 1; i++) {
+    const x1 = t[i][0], y1 = t[i][1], x2 = t[i + 1][0], y2 = t[i + 1][1];
+    if (paceSecPerMile >= x1 && paceSecPerMile <= x2) return y1 + ((paceSecPerMile - x1) / (x2 - x1)) * (y2 - y1);
+  }
+  return 2.0;
+}
+function heatMultiplier(tempF, rh, paceSecPerMile) {
+  if (tempF == null || rh == null || isNaN(tempF) || isNaN(rh)) return 1;
+  const tempC = ((tempF - 32) * 5) / 9;
+  const wbgt = wbgtApproxC(tempC, rh);
+  if (wbgt <= WBGT_THRESHOLD_C) return 1;
+  const per5 = heatSensitivityPer5C(paceSecPerMile);
+  return 1 + ((wbgt - WBGT_THRESHOLD_C) / 5) * (per5 / 100);
+}
+// Altitude -> race-pace slowdown for a non-acclimated runner, interpolated
+// between published empirical anchors (~3-6% at 5,000ft, 6-10% at 7,500ft,
+// 12-18% at 10,000ft); values below are near the low-to-middle of each band.
+//
+// NOTE ON A CORRECTION: an earlier version used a two-stage VO2max-decline
+// model (~1%/1000m below 1500m, ~6.3%/1000m above). That's physiologically
+// sound but it predicted only ~1.7% at 5,000ft — roughly half of what runners
+// actually lose in races at Denver-ish elevation. VO2max decline is a proxy;
+// this tool is answering the pace question directly, so it should be anchored
+// to pace data. Acclimatization roughly halves these; this assumes none.
+const ALT_TABLE_FT = [
+  [0, 1.000], [1000, 1.003], [2000, 1.008], [3000, 1.016], [4000, 1.027],
+  [5000, 1.040], [6000, 1.054], [7500, 1.075], [10000, 1.140], [12000, 1.200],
+];
+function altitudeMultiplier(elevationM) {
+  if (elevationM == null || isNaN(elevationM)) return 1;
+  const ft = Math.max(0, elevationM * 3.28084);
+  const t = ALT_TABLE_FT;
+  if (ft <= t[0][0]) return t[0][1];
+  const last = t[t.length - 1];
+  if (ft >= last[0]) {
+    const prev = t[t.length - 2];
+    const slope = (last[1] - prev[1]) / (last[0] - prev[0]);
+    return last[1] + slope * (ft - last[0]);
+  }
+  for (let i = 0; i < t.length - 1; i++) {
+    const x1 = t[i][0], y1 = t[i][1], x2 = t[i + 1][0], y2 = t[i + 1][1];
+    if (ft >= x1 && ft <= x2) return y1 + ((ft - x1) / (x2 - x1)) * (y2 - y1);
+  }
+  return 1;
+}
+function windMultiplier(runnerMps, headwindMps) {
+  if (!runnerMps || runnerMps <= 0 || headwindMps == null || isNaN(headwindMps)) return 1;
+  const k = 0.011;
+  const effectiveAirSpeed = Math.max(0, runnerMps + headwindMps);
+  const ratio = effectiveAirSpeed / runnerMps;
+  return 1 + k * (ratio * ratio - 1);
+}
+function aqiMultiplier(pm25) {
+  if (pm25 == null || isNaN(pm25)) return 1;
+  const p = Math.max(0, Math.min(120, pm25));
+  return 1 + p * 0.0023;
+}
+function windDirLabel(deg) {
+  if (deg == null || isNaN(deg)) return '—';
+  const dirs = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+  return dirs[Math.round(deg / 22.5) % 16];
+}
+
+/* ============================================================
+   FILE PARSING (GPX / TCX)
+   ============================================================ */
+function getTag(el, tag) { const f = el.getElementsByTagNameNS('*', tag); return f.length ? f[0] : null; }
+function getTagAll(doc, tag) { return Array.from(doc.getElementsByTagNameNS('*', tag)); }
+
+function parseGPX(doc) {
+  return getTagAll(doc, 'trkpt').map((pt) => {
+    const eleEl = getTag(pt, 'ele'), timeEl = getTag(pt, 'time');
+    return {
+      lat: parseFloat(pt.getAttribute('lat')),
+      lon: parseFloat(pt.getAttribute('lon')),
+      ele: eleEl ? parseFloat(eleEl.textContent) : null,
+      time: timeEl ? new Date(timeEl.textContent) : null,
+    };
+  });
+}
+function parseTCX(doc) {
+  return getTagAll(doc, 'Trackpoint').map((pt) => {
+    const posEl = getTag(pt, 'Position');
+    const latEl = posEl ? getTag(posEl, 'LatitudeDegrees') : null;
+    const lonEl = posEl ? getTag(posEl, 'LongitudeDegrees') : null;
+    const altEl = getTag(pt, 'AltitudeMeters'), timeEl = getTag(pt, 'Time');
+    return {
+      lat: latEl ? parseFloat(latEl.textContent) : null,
+      lon: lonEl ? parseFloat(lonEl.textContent) : null,
+      ele: altEl ? parseFloat(altEl.textContent) : null,
+      time: timeEl ? new Date(timeEl.textContent) : null,
+    };
+  });
+}
+function buildSegments(points, binMeters) {
+  const withDist = [{ ...points[0], cumDist: 0 }];
+  for (let i = 1; i < points.length; i++) {
+    const d = haversineMeters(points[i - 1].lat, points[i - 1].lon, points[i].lat, points[i].lon);
+    withDist.push({ ...points[i], cumDist: withDist[i - 1].cumDist + d });
+  }
+  const segments = [];
+  let binStart = withDist[0];
+  for (let i = 1; i < withDist.length; i++) {
+    const isLast = i === withDist.length - 1;
+    if (withDist[i].cumDist - binStart.cumDist >= binMeters || isLast) {
+      const a = binStart, b = withDist[i];
+      const dist = b.cumDist - a.cumDist;
+      if (dist > 0.5 && a.time && b.time) {
+        const dt = (b.time.getTime() - a.time.getTime()) / 1000;
+        const hasElevation = a.ele != null && b.ele != null && !isNaN(a.ele) && !isNaN(b.ele);
+        let grade = hasElevation ? (b.ele - a.ele) / dist : 0;
+        grade = Math.max(-0.45, Math.min(0.45, grade));
+        segments.push({ distance: dist, dt, grade, bearing: bearingDegrees(a.lat, a.lon, b.lat, b.lon) });
+      }
+      binStart = b;
+    }
+  }
+  return segments;
+}
+
+/* ============================================================
+   CONDITIONS: direct Open-Meteo first, Claude+search fallback
+   ============================================================ */
+function nearestHourIndex(timesArray, date) {
+  const targetPrefix = date.toISOString().slice(0, 13);
+  const idx = timesArray.findIndex((t) => t.startsWith(targetPrefix));
+  return idx >= 0 ? idx : 0;
+}
+
+async function fetchWeatherDirect(lat, lon, date, elevationM) {
+  const d = date.toISOString().slice(0, 10);
+  // elevation= feeds Open-Meteo's statistical downscaling. We know the real
+  // elevation from the GPX track, which beats their 90m DEM guess in complex
+  // terrain -- worth a lot at 5,000ft in Arizona.
+  const elevParam = (elevationM != null && !isNaN(elevationM)) ? `&elevation=${Math.round(elevationM)}` : '';
+  const url = `https://archive-api.open-meteo.com/v1/archive?latitude=${lat}&longitude=${lon}&start_date=${d}&end_date=${d}${elevParam}&hourly=temperature_2m,relative_humidity_2m,wind_speed_10m,wind_direction_10m,cloud_cover,shortwave_radiation&timezone=UTC`;
+  let res;
+  try { res = await fetch(url); }
+  catch (netErr) { throw new Error(`network(${netErr.name || 'Error'}: ${netErr.message || 'no message'})`); }
+  if (!res.ok) {
+    let body = ''; try { body = (await res.text()).slice(0, 120); } catch (_) {}
+    throw new Error(`http ${res.status}${body ? ': ' + body : ''}`);
+  }
+  const data = await res.json();
+  if (!data.hourly || !data.hourly.time || !data.hourly.time.length) throw new Error('empty response (no hourly data)');
+  const idx = nearestHourIndex(data.hourly.time, date);
+  const tempC = data.hourly.temperature_2m[idx];
+  const rh = data.hourly.relative_humidity_2m[idx];
+  const windKmh = data.hourly.wind_speed_10m[idx];
+  const windDirDeg = data.hourly.wind_direction_10m[idx];
+  const cloudCover = data.hourly.cloud_cover ? data.hourly.cloud_cover[idx] : null;
+  const solarWm2 = data.hourly.shortwave_radiation ? data.hourly.shortwave_radiation[idx] : null;
+  return {
+    tempF: (tempC * 9) / 5 + 32, rh,
+    windSpeedMps: windKmh / 3.6, windSpeedMph: windKmh / 1.609, windDirDeg,
+    cloudCover, solarWm2,
+    elevationM: data.elevation,
+  };
+}
+
+async function fetchAirQualityDirect(lat, lon, date) {
+  const d = date.toISOString().slice(0, 10);
+  const url = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${lat}&longitude=${lon}&start_date=${d}&end_date=${d}&hourly=pm2_5,uv_index&timezone=UTC`;
+  let res;
+  try { res = await fetch(url); }
+  catch (netErr) { throw new Error(`network(${netErr.name || 'Error'}: ${netErr.message || 'no message'})`); }
+  if (!res.ok) {
+    let body = ''; try { body = (await res.text()).slice(0, 120); } catch (_) {}
+    throw new Error(`http ${res.status}${body ? ': ' + body : ''}`);
+  }
+  const data = await res.json();
+  if (!data.hourly || !data.hourly.time || !data.hourly.time.length) throw new Error('empty response (no hourly data)');
+  const idx = nearestHourIndex(data.hourly.time, date);
+  return { pm25: data.hourly.pm2_5 ? data.hourly.pm2_5[idx] : null, uvIndex: data.hourly.uv_index ? data.hourly.uv_index[idx] : null };
+}
+
+// Attempts the direct lookup and reports plainly if it's refused.
+// The Claude-API fallback that used to live here was removed: the artifact
+// sandbox rejects it at runtime ("Internal server error while processing
+// action"), so it was dead weight that only produced confusing errors.
+// When this file is served from an ordinary static host instead of the
+// sandbox, these direct calls succeed on their own (Open-Meteo permits
+// cross-origin browser requests), and the manual panel becomes an override.
+async function getConditions(lat, lon, date, elevationM) {
+  const out = { weather: null, aqi: null, weatherErr: '', aqiErr: '' };
+  try { out.weather = await fetchWeatherDirect(lat, lon, date, elevationM); }
+  catch (e) { out.weatherErr = e.message || e.name || 'failed'; }
+  try { out.aqi = await fetchAirQualityDirect(lat, lon, date); }
+  catch (e) { out.aqiErr = e.message || e.name || 'failed'; }
+  return out;
+}
+
+// Merges file-derived data, auto-fetched data, and manual entry.
+// Precedence: manual > auto. Elevation is special — if the GPX carries
+// elevation we always trust it over any weather-API value, which also
+// means altitude works with no network at all. (Earlier versions only
+// read elevation off the weather response, so a failed fetch silently
+// discarded perfectly good elevation data from the file itself.)
+function mergedConditions(r) {
+  const m = r.manual, a = r.auto;
+  const pick = (manualVal, autoVal) => (manualVal != null && !isNaN(manualVal)) ? manualVal : (autoVal != null && !isNaN(autoVal) ? autoVal : null);
+
+  const tempF = pick(m.tempF, a.weather ? a.weather.tempF : null);
+  const rh = pick(m.rh, a.weather ? a.weather.rh : null);
+
+  const windMph = pick(m.windMph, a.weather ? a.weather.windSpeedMph : null);
+  const windDirDeg = pick(m.windDirDeg, a.weather ? a.weather.windDirDeg : null);
+  const pm25 = pick(m.pm25, a.aqi ? a.aqi.pm25 : null);
+  const elevationM = r.hasElevation ? r.avgElevation : (a.weather ? a.weather.elevationM : null);
+
+  const weather = {
+    tempF, rh, elevationM,
+    windSpeedMph: windMph,
+    windSpeedMps: windMph != null ? windMph * 0.44704 : 0,
+    windDirDeg,
+    cloudCover: a.weather ? a.weather.cloudCover : null,
+    solarWm2: a.weather ? a.weather.solarWm2 : null,
+  };
+  return { weather, pm25 };
+}
+
+/* ============================================================
+   MAIN COMPUTATION
+   ============================================================ */
+function computeAdjustedPace(segments, weather, pm25) {
+  let totalDist = 0, totalTime = 0, adjustedTime = 0, gradeWeightSum = 0, windWeightSum = 0;
+  const windSpeedMps = weather && weather.windSpeedMps != null && !isNaN(weather.windSpeedMps) ? weather.windSpeedMps : 0;
+  const windDirDeg = weather && weather.windDirDeg != null && !isNaN(weather.windDirDeg) ? weather.windDirDeg : 0;
+
+  segments.forEach((seg) => {
+    if (seg.dt <= 0) return;
+    totalDist += seg.distance; totalTime += seg.dt;
+    const speedMps = seg.distance / seg.dt;
+    const gMult = gradeCostRatio(seg.grade);
+    let wMult = 1;
+    if (windSpeedMps > 0) {
+      const angle = toRad(windDirDeg - seg.bearing);
+      const headwindComp = windSpeedMps * Math.cos(angle);
+      wMult = windMultiplier(speedMps, headwindComp);
+    }
+    adjustedTime += seg.dt / (gMult * wMult);
+    gradeWeightSum += gMult * seg.dt;
+    windWeightSum += wMult * seg.dt;
+  });
+
+  const avgGradeMult = totalTime > 0 ? gradeWeightSum / totalTime : 1;
+  const avgWindMult = totalTime > 0 ? windWeightSum / totalTime : 1;
+
+  // Heat sensitivity scales with how fast the runner actually ran, so it's
+  // resolved here rather than per-segment. Uses ACTUAL pace, not adjusted
+  // pace, which keeps this non-circular.
+  const distMiles = totalDist / 1609.34;
+  const actualPaceSecPerMile = distMiles > 0 ? totalTime / distMiles : null;
+  const heatMult = weather ? heatMultiplier(weather.tempF, weather.rh, actualPaceSecPerMile) : 1;
+  const wbgtC = (weather && weather.tempF != null && weather.rh != null)
+    ? wbgtApproxC(((weather.tempF - 32) * 5) / 9, weather.rh) : null;
+
+  const altMult = weather ? altitudeMultiplier(weather.elevationM) : 1;
+  const aqMult = aqiMultiplier(pm25);
+  const finalAdjustedTime = adjustedTime / (heatMult * altMult * aqMult);
+  const combinedMultiplier = finalAdjustedTime > 0 ? totalTime / finalAdjustedTime : 1;
+
+  return {
+    totalDist, totalTime, finalAdjustedTime, combinedMultiplier, wbgtC,
+    heatSensitivity: heatSensitivityPer5C(actualPaceSecPerMile),
+    breakdown: { grade: avgGradeMult, heat: heatMult, altitude: altMult, wind: avgWindMult, aqi: aqMult },
+  };
+}
+
+/* ============================================================
+   FORMATTING
+   ============================================================ */
+function formatPace(secPerMile) {
+  if (!isFinite(secPerMile) || secPerMile <= 0) return '--:--';
+  let m = Math.floor(secPerMile / 60), s = Math.round(secPerMile % 60);
+  if (s === 60) { s = 0; m += 1; }
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+function formatPct(mult) {
+  const pct = (mult - 1) * 100;
+  return `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`;
+}
+function formatDuration(totalSeconds) {
+  const h = Math.floor(totalSeconds / 3600), m = Math.floor((totalSeconds % 3600) / 60), s = Math.round(totalSeconds % 60);
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+/* ============================================================
+   ELEVATION CHART — hand-rolled SVG, no chart library
+   ============================================================ */
+function elevationChartSVG(points) {
+  const data = [];
+  let cum = 0;
+  const step = Math.max(1, Math.floor(points.length / 200));
+  for (let i = 0; i < points.length; i += step) {
+    if (i > 0) {
+      const prev = points[i - step] || points[0];
+      cum += haversineMeters(prev.lat, prev.lon, points[i].lat, points[i].lon);
+    }
+    if (points[i].ele != null) data.push({ dist: cum / 1609.34, ele: points[i].ele * 3.28084 });
+  }
+  if (data.length < 2) return '';
+  const w = 600, h = 110, padB = 20, padT = 6;
+  const minE = Math.min(...data.map((d) => d.ele)) - 20;
+  const maxE = Math.max(...data.map((d) => d.ele)) + 20;
+  const maxD = data[data.length - 1].dist || 1;
+  const x = (d) => (d / maxD) * w;
+  const y = (e) => padT + (1 - (e - minE) / (maxE - minE)) * (h - padB - padT);
+  let path = `M ${x(data[0].dist).toFixed(1)} ${y(data[0].ele).toFixed(1)}`;
+  data.forEach((d) => { path += ` L ${x(d.dist).toFixed(1)} ${y(d.ele).toFixed(1)}`; });
+  const areaPath = path + ` L ${x(maxD).toFixed(1)} ${h - padB} L ${x(0).toFixed(1)} ${h - padB} Z`;
+  const ticks = [0, maxD * 0.25, maxD * 0.5, maxD * 0.75, maxD].map((v) => `<text x="${x(v).toFixed(1)}" y="${h - 4}" font-size="9" fill="#8B98A5" font-family="JetBrains Mono, monospace" text-anchor="${v === 0 ? 'start' : v === maxD ? 'end' : 'middle'}">${v.toFixed(1)}mi</text>`).join('');
+  return `<svg class="chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
+    <defs><linearGradient id="eleGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#6B8F6E" stop-opacity="0.55"/><stop offset="100%" stop-color="#6B8F6E" stop-opacity="0.03"/>
+    </linearGradient></defs>
+    <path d="${areaPath}" fill="url(#eleGrad)"/>
+    <path d="${path}" fill="none" stroke="#6B8F6E" stroke-width="1.5" vector-effect="non-scaling-stroke"/>
+    <line x1="0" y1="${h - padB}" x2="${w}" y2="${h - padB}" stroke="rgba(237,234,226,0.12)"/>
+    ${ticks}
+  </svg>`;
+}
+
+/* ============================================================
+   STATE + RENDER
+   ============================================================ */
+const state = { stage: 'upload', error: '', result: null };
+const stageEl = document.getElementById('stage');
+
+function factorRowHTML(colorVar, iconName, label, mult, detail) {
+  const pct = (mult - 1) * 100;
+  const width = Math.min(100, Math.max(4, Math.abs(pct) * 4));
+  return `<div class="factor-row">
+    <div class="factor-head">
+      <span class="factor-label" style="color:${colorVar}">${icon(iconName, 13)} ${label}</span>
+      <span class="factor-pct" style="color:${colorVar}">${formatPct(mult)}</span>
+    </div>
+    <div class="factor-track"><div class="factor-fill" style="width:${width}%;background:${colorVar}"></div></div>
+    <div class="factor-detail">${escapeHtml(detail)}</div>
+  </div>`;
+}
+
+function render() {
+  if (state.stage === 'upload') {
+    stageEl.innerHTML = `
+      <div class="upload-zone" id="upload-zone" role="button" tabindex="0">
+        <input type="file" id="file-input" accept=".gpx,.tcx" style="display:none" />
+        ${icon('upload', 28, '#6B8F6E')}
+        <div class="upload-title">Drop a GPX or TCX file</div>
+        <div class="upload-sub">or tap to browse — exported from Garmin Connect or your Apple Watch</div>
+      </div>`;
+    const zone = document.getElementById('upload-zone');
+    const input = document.getElementById('file-input');
+    zone.addEventListener('click', () => input.click());
+    zone.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); input.click(); } });
+    zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('drag-over'); });
+    zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+    zone.addEventListener('drop', (e) => { e.preventDefault(); zone.classList.remove('drag-over'); if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]); });
+    input.addEventListener('change', (e) => { if (e.target.files[0]) handleFile(e.target.files[0]); });
+  } else if (state.stage === 'parsing' || state.stage === 'fetching') {
+    const label = state.stage === 'parsing' ? 'Reading route…' : 'Pulling historical conditions for that time and place…';
+    stageEl.innerHTML = `<div class="state-box">${icon('loader', 26, '#6B8F6E', 'spin')}<div class="state-label">${label}</div></div>`;
+  } else if (state.stage === 'error') {
+    stageEl.innerHTML = `<div class="state-box">${icon('alert', 26, '#D9695F')}<div class="error-title">Couldn't process that file</div><div class="error-detail">${escapeHtml(state.error)}</div><button class="retry" id="retry-btn">Try another file</button></div>`;
+    document.getElementById('retry-btn').addEventListener('click', reset);
+  } else if (state.stage === 'done' && state.result) {
+    const r = state.result;
+    const distMiles = r.computed.totalDist / 1609.34;
+    const actualPaceSec = distMiles > 0 ? r.computed.totalTime / distMiles : 0;
+    const adjustedPaceSec = distMiles > 0 ? r.computed.finalAdjustedTime / distMiles : 0;
+    const chart = r.hasElevation ? elevationChartSVG(r.points) : '';
+    const w = r.weather;
+    const autoFailed = !r.auto.weather;
+    const anyManual = Object.values(r.manual).some((v) => v != null);
+
+    const heatDetail = r.computed.wbgtC != null
+      ? `WBGT ~${Math.round((r.computed.wbgtC * 9) / 5 + 32)}°F (${r.computed.wbgtC.toFixed(1)}°C) from ${Math.round(w.tempF)}°F / ${Math.round(w.rh)}% RH · ${r.computed.heatSensitivity.toFixed(1)}%/5°C at your pace`
+      : 'Needs temp + humidity — enter below';
+    const altDetail = w.elevationM != null
+      ? `~${Math.round(w.elevationM * 3.28084).toLocaleString()}′ elevation${r.hasElevation ? ' (from your file)' : ''}`
+      : 'No elevation in file — enter below';
+    const windDetail = w.windSpeedMph != null
+      ? `${Math.round(w.windSpeedMph)} mph from the ${windDirLabel(w.windDirDeg)}`
+      : 'Needs wind speed — enter below';
+    const aqiDetail = r.pm25 != null
+      ? `${Number(r.pm25).toFixed(1)} μg/m³ PM2.5`
+      : 'Optional — enter PM2.5 below';
+
+    const val = (v) => (v == null ? '' : v);
+    const coordStr = `${r.lat.toFixed(4)}, ${r.lon.toFixed(4)}`;
+    const whenStr = r.startTime.toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
+
+    stageEl.innerHTML = `
+      <div class="result-card">
+        <div class="hero-pace">
+          <div class="hero-label">Adjusted pace · ideal conditions</div>
+          <div class="hero-number">${formatPace(adjustedPaceSec)}</div>
+          <div class="hero-unit">min / mile</div>
+          <div class="hero-vs">actual pace was <b>${formatPace(actualPaceSec)}/mi</b> — equivalent effort was <b>${formatPct(r.computed.combinedMultiplier)}</b> harder than ideal</div>
+        </div>
+        <div class="stats-row">
+          <div class="stat"><div class="stat-val">${distMiles.toFixed(2)}</div><div class="stat-key">Miles</div></div>
+          <div class="stat"><div class="stat-val">${Math.round(r.gainFt)}′</div><div class="stat-key">Gain</div></div>
+          <div class="stat"><div class="stat-val">${formatDuration(r.computed.totalTime)}</div><div class="stat-key">Duration</div></div>
+        </div>
+        ${chart ? `<div class="section"><div class="section-title">Elevation Profile</div>${chart}</div>` : ''}
+        <div class="section">
+          <div class="section-title-row">
+            <div class="section-title">Factor Breakdown</div>
+            ${anyManual ? `<span class="estimate-badge">${icon('sparkles', 10)} manual input</span>` : ''}
+          </div>
+          ${factorRowHTML('#6B8F6E', 'trendUp', 'Grade', r.computed.breakdown.grade, r.hasElevation ? `${Math.round(r.gainFt)}′ gain / ${Math.round(r.lossFt)}′ loss over the route` : 'No elevation data in file')}
+          ${factorRowHTML('#E2984A', 'droplet', 'Heat', r.computed.breakdown.heat, heatDetail)}
+          ${factorRowHTML('#9B87C4', 'mountain', 'Altitude', r.computed.breakdown.altitude, altDetail)}
+          ${factorRowHTML('#5AACC7', 'wind', 'Wind', r.computed.breakdown.wind, windDetail)}
+          ${factorRowHTML('#A08F7A', 'alert', 'Air Quality', r.computed.breakdown.aqi, aqiDetail)}
+        </div>
+        <div class="section">
+          <div class="section-title">Conditions</div>
+          ${autoFailed ? `<div class="fetch-note">${icon('alert', 13)} <span>Auto-lookup blocked here (<code>${escapeHtml(r.auto.weatherErr)}</code>). Grade and altitude still come straight from your file. Fill in the rest below — any weather app or history site for <b>${escapeHtml(whenStr)}</b> near <b>${escapeHtml(coordStr)}</b> will have them.</span></div>` : ''}
+          <div class="input-grid">
+            <label class="in-field"><span class="cond-key">Temp °F</span><input id="in-temp" type="number" inputmode="decimal" step="1" value="${val(r.manual.tempF)}" placeholder="${r.auto.weather && r.auto.weather.tempF != null ? Math.round(r.auto.weather.tempF) : '—'}" /></label>
+            <label class="in-field"><span class="cond-key">Humidity %</span><input id="in-rh" type="number" inputmode="decimal" step="1" value="${val(r.manual.rh)}" placeholder="${r.auto.weather && r.auto.weather.rh != null ? Math.round(r.auto.weather.rh) : '—'}" /></label>
+            <label class="in-field"><span class="cond-key">Wind mph</span><input id="in-wind" type="number" inputmode="decimal" step="1" value="${val(r.manual.windMph)}" placeholder="${r.auto.weather && r.auto.weather.windSpeedMph != null ? Math.round(r.auto.weather.windSpeedMph) : '—'}" /></label>
+            <label class="in-field"><span class="cond-key">Wind from °</span><input id="in-winddir" type="number" inputmode="decimal" step="1" value="${val(r.manual.windDirDeg)}" placeholder="0=N 90=E" /></label>
+            <label class="in-field"><span class="cond-key">PM2.5 μg/m³</span><input id="in-pm25" type="number" inputmode="decimal" step="0.1" value="${val(r.manual.pm25)}" placeholder="optional" /></label>
+            <label class="in-field"><span class="cond-key">Elevation ft</span><input type="number" value="${w.elevationM != null ? Math.round(w.elevationM * 3.28084) : ''}" disabled /></label>
+          </div>
+          <button class="apply-btn" id="apply-btn">Apply conditions</button>
+          ${(w.cloudCover != null && w.cloudCover >= 55 && r.computed.breakdown.heat > 1.001) ? `<div class="estimate-note">${icon('alert', 13)} <span>${Math.round(w.cloudCover)}% cloud cover${w.solarWm2 != null ? `, ${Math.round(w.solarWm2)} W/m² sun` : ''}. The WBGT formula assumes moderate sun, so the ${formatPct(r.computed.breakdown.heat)} heat figure is likely an overestimate — read it as a ceiling.</span></div>` : ''}
+          <div class="note">Grade uses the Minetti et al. (2002) cost curve and needs nothing but your file — it bottoms out around an 18% downhill and costs ~1.66× flat at a 10% climb. Altitude reads elevation straight from the track and maps it to empirical non-acclimated race-pace slowdown. Heat estimates WBGT from temperature and humidity (the Bureau of Meteorology / ACSM formula) and converts it to pace loss using Ely et al. (2007), scaled to your own pace since slower runners lose more. Caveat worth knowing: that WBGT formula assumes moderate sun and light wind — it overestimates heat stress on cloudy, windy, or early-morning runs. Wind resolves against your GPS heading segment-by-segment, so direction matters. Barometric pressure was evaluated but isn't included — day-to-day swings are physiologically negligible next to elevation.</div>
+        </div>
+        <div style="padding:0 24px 24px"><button class="reset-btn" id="reset-btn">${icon('reset', 13)} Analyze another run</button></div>
+      </div>`;
+    document.getElementById('reset-btn').addEventListener('click', reset);
+    document.getElementById('apply-btn').addEventListener('click', applyManual);
+  }
+}
+
+function reset() { state.stage = 'upload'; state.error = ''; state.result = null; render(); }
+
+// Recomputes from whatever conditions are currently known (file + auto + manual).
+function recompute() {
+  const r = state.result;
+  if (!r) return;
+  const { weather, pm25 } = mergedConditions(r);
+  r.weather = weather;
+  r.pm25 = pm25;
+  r.computed = computeAdjustedPace(r.segments, weather, pm25);
+}
+
+function applyManual() {
+  const r = state.result;
+  if (!r) return;
+  const num = (id) => {
+    const el = document.getElementById(id);
+    if (!el || el.value.trim() === '') return null;
+    const v = parseFloat(el.value);
+    return isNaN(v) ? null : v;
+  };
+  r.manual = { tempF: num('in-temp'), rh: num('in-rh'), windMph: num('in-wind'), windDirDeg: num('in-winddir'), pm25: num('in-pm25') };
+  recompute();
+  render();
+}
+
+async function handleFile(file) {
+  state.error = ''; state.stage = 'parsing'; render();
+  try {
+    const text = await file.text();
+    const doc = new DOMParser().parseFromString(text, 'text/xml');
+    if (doc.querySelector('parsererror')) throw new Error("Couldn't read this file as GPX or TCX. Try re-exporting it.");
+    const rootName = doc.documentElement ? doc.documentElement.localName.toLowerCase() : '';
+    let points;
+    if (rootName === 'gpx' || /\.gpx$/i.test(file.name)) points = parseGPX(doc);
+    else if (rootName === 'trainingcenterdatabase' || /\.tcx$/i.test(file.name)) points = parseTCX(doc);
+    else throw new Error('Unrecognized file type. Please upload a .gpx or .tcx file.');
+
+    points = points.filter((p) => p.lat != null && p.lon != null && !isNaN(p.lat) && !isNaN(p.lon));
+    if (points.length < 2) throw new Error('No GPS track found in this file.');
+    if (!points[0].time) throw new Error("This file has no timestamps, so pace can't be calculated.");
+
+    const segments = buildSegments(points, 50);
+    if (segments.length === 0) throw new Error('Not enough distance or time data to compute pace.');
+
+    const elevations = points.map((p) => p.ele).filter((e) => e != null && !isNaN(e));
+    const hasElevation = elevations.length > points.length * 0.5;
+    const avgElevation = elevations.length ? elevations.reduce((a, b) => a + b, 0) / elevations.length : null;
+    let gain = 0, loss = 0;
+    segments.forEach((s) => { const rise = s.grade * s.distance; if (rise > 0) gain += rise; else loss += -rise; });
+
+    state.stage = 'fetching'; render();
+    const startTime = points[0].time;
+    const mid = points[Math.floor(points.length / 2)];
+
+    const auto = await getConditions(mid.lat, mid.lon, startTime, hasElevation ? avgElevation : null);
+
+    state.result = {
+      points, startTime, segments, hasElevation, avgElevation,
+      gainFt: gain * 3.28084, lossFt: loss * 3.28084,
+      lat: mid.lat, lon: mid.lon,
+      auto,
+      manual: { tempF: null, rh: null, windMph: null, windDirDeg: null, pm25: null },
+      weather: null, pm25: null, computed: null,
+    };
+    recompute();
+    state.stage = 'done';
+  } catch (e) {
+    state.error = e.message || 'Something went wrong reading this file.';
+    state.stage = 'error';
+  }
+  render();
+}
+
+render();
+</script>
+</body>
+</html>
