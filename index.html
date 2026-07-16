@@ -92,6 +92,31 @@ button.retry:focus-visible { outline:2px solid var(--text); outline-offset:2px; 
 .in-field input::placeholder { color:var(--text-dim); font-weight:400; opacity:.55; }
 button.apply-btn { width:100%; background:var(--contour); color:#0F1720; border:none; padding:12px; font-family:'Inter',sans-serif; font-size:13px; font-weight:600; border-radius:10px; cursor:pointer; margin-top:12px; }
 button.apply-btn:focus-visible { outline:2px solid var(--text); outline-offset:2px; }
+.tabs { display:flex; gap:6px; background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:4px; margin-bottom:20px; }
+button.tab { flex:1; background:transparent; border:none; color:var(--text-dim); padding:9px; font-family:'Inter',sans-serif; font-size:13px; font-weight:600; border-radius:9px; cursor:pointer; }
+button.tab.active { background:var(--surface-2); color:var(--text); }
+button.tab:focus-visible { outline:2px solid var(--contour); outline-offset:1px; }
+button.save-btn { width:100%; background:var(--ideal); color:#0F1720; border:none; padding:13px; font-family:'Inter',sans-serif; font-size:13px; font-weight:700; border-radius:10px; cursor:pointer; }
+button.save-btn:disabled { background:var(--surface-2); color:var(--text-dim); cursor:default; }
+button.save-btn:focus-visible { outline:2px solid var(--text); outline-offset:2px; }
+.trend-line { font-family:'JetBrains Mono',monospace; font-size:12px; margin-top:10px; line-height:1.6; }
+.trend-good { color:var(--ideal); }
+.trend-bad { color:var(--heat); }
+.trend-flat { color:var(--text-dim); }
+.log-row { display:flex; align-items:center; gap:10px; padding:12px 0; border-bottom:1px solid var(--border); }
+.log-row:last-child { border-bottom:none; }
+.log-main { flex:1; min-width:0; }
+.log-date { font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--text-dim); letter-spacing:.04em; }
+.log-pace { font-family:'JetBrains Mono',monospace; font-size:14px; font-weight:600; margin-top:3px; }
+.log-pace .adj { color:var(--ideal); }
+.log-pace .arrow { color:var(--text-dim); margin:0 5px; }
+.log-meta { font-size:11px; color:var(--text-dim); margin-top:3px; }
+button.del-btn { background:transparent; border:1px solid var(--border); color:var(--text-dim); width:28px; height:28px; border-radius:7px; cursor:pointer; flex-shrink:0; font-size:15px; line-height:1; padding:0; }
+button.del-btn:hover { border-color:var(--error); color:var(--error); }
+.io-row { display:flex; gap:8px; margin-top:16px; }
+button.io-btn { flex:1; background:transparent; border:1px solid var(--border); color:var(--text-dim); padding:10px; font-family:'Inter',sans-serif; font-size:12px; font-weight:500; border-radius:9px; cursor:pointer; }
+button.io-btn:hover { border-color:var(--text-dim); color:var(--text); }
+.empty-log { text-align:center; padding:36px 20px; color:var(--text-dim); font-size:13px; line-height:1.6; }
 .estimate-note { margin-top:12px; font-size:12px; color:var(--estimate); line-height:1.6; display:flex; gap:6px; align-items:flex-start; }
 .note { font-size:12px; color:var(--text-dim); line-height:1.6; margin-top:12px; }
 button.reset-btn { width:100%; background:transparent; border:1px solid var(--border); color:var(--text-dim); padding:13px; font-family:'Inter',sans-serif; font-size:13px; font-weight:500; border-radius:10px; cursor:pointer; margin-top:18px; }
@@ -106,6 +131,10 @@ svg.chart { width:100%; height:110px; display:block; }
   <div class="eyebrow">Route Analysis</div>
   <h1>Strip the conditions out of your pace.</h1>
   <p class="lede">Upload a run and see the pace you'd have run in ideal conditions — adjusted for hills, heat, altitude, wind, and air quality.</p>
+  <div class="tabs" id="tabs">
+    <button class="tab active" data-view="analyze">Analyze</button>
+    <button class="tab" data-view="history">History</button>
+  </div>
   <div id="stage"></div>
   <div class="footnote">Grade &amp; altitude computed from your file · weather auto-fetches via Open-Meteo when self-hosted, manual entry otherwise · runs in your browser, files aren't uploaded anywhere</div>
 </div>
@@ -539,10 +568,178 @@ function elevationChartSVG(points) {
 }
 
 /* ============================================================
+   TRAINING LOG — localStorage
+   Home-screen web apps are exempt from Safari's 7-day ITP storage
+   wipe (they run outside Safari with their own use counter), which is
+   why this is viable here but was impossible in the artifact sandbox.
+   iOS can still evict data under storage pressure, so Export is the
+   real backup and is deliberately prominent.
+   ============================================================ */
+const LOG_KEY = 'truepace:log:v1';
+
+function loadLog() {
+  try {
+    const raw = localStorage.getItem(LOG_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (e) {
+    console.error('log read failed', e);
+    return [];
+  }
+}
+function saveLog(entries) {
+  try {
+    localStorage.setItem(LOG_KEY, JSON.stringify(entries));
+    return true;
+  } catch (e) {
+    console.error('log write failed', e);
+    return false;
+  }
+}
+function logHas(id) { return loadLog().some((e) => e.id === id); }
+
+function addToLog(entry) {
+  const entries = loadLog();
+  const i = entries.findIndex((e) => e.id === entry.id);
+  if (i >= 0) entries[i] = entry; else entries.push(entry);
+  entries.sort((a, b) => new Date(a.date) - new Date(b.date));
+  return saveLog(entries);
+}
+function removeFromLog(id) {
+  saveLog(loadLog().filter((e) => e.id !== id));
+}
+
+function entryFromResult(r) {
+  const distMiles = r.computed.totalDist / 1609.34;
+  const w = r.weather || {};
+  return {
+    id: r.startTime.toISOString(),
+    date: r.startTime.toISOString(),
+    distMiles: +distMiles.toFixed(3),
+    durationSec: Math.round(r.computed.totalTime),
+    actualPaceSec: distMiles > 0 ? r.computed.totalTime / distMiles : null,
+    adjustedPaceSec: distMiles > 0 ? r.computed.finalAdjustedTime / distMiles : null,
+    combined: r.computed.combinedMultiplier,
+    gainFt: Math.round(r.gainFt),
+    breakdown: r.computed.breakdown,
+    wbgtC: r.computed.wbgtC,
+    conditions: {
+      tempF: w.tempF, rh: w.rh, windMph: w.windSpeedMph, windDirDeg: w.windDirDeg,
+      pm25: r.pm25, elevationFt: w.elevationM != null ? Math.round(w.elevationM * 3.28084) : null,
+      cloudCover: w.cloudCover,
+    },
+    lat: r.lat, lon: r.lon,
+    manualEntry: Object.values(r.manual).some((v) => v != null),
+  };
+}
+
+// Least-squares slope of adjusted pace vs. time. Negative slope = getting
+// faster in like-for-like conditions, which is the whole point of the app:
+// actual pace is mostly weather noise, adjusted pace is the fitness signal.
+function paceTrend(entries) {
+  const pts = entries
+    .filter((e) => e.adjustedPaceSec != null)
+    .map((e) => ({ t: new Date(e.date).getTime() / 86400000, y: e.adjustedPaceSec }));
+  if (pts.length < 3) return null;
+  const n = pts.length;
+  const xbar = pts.reduce((s, p) => s + p.t, 0) / n;
+  const ybar = pts.reduce((s, p) => s + p.y, 0) / n;
+  let num = 0, den = 0;
+  pts.forEach((p) => { num += (p.t - xbar) * (p.y - ybar); den += (p.t - xbar) ** 2; });
+  if (den === 0) return null;
+  const slopePerDay = num / den;
+  const spanDays = pts[pts.length - 1].t - pts[0].t;
+  return { slopePerWeek: slopePerDay * 7, spanDays, n };
+}
+
+function trendChartSVG(entries) {
+  const pts = entries.filter((e) => e.adjustedPaceSec != null && e.actualPaceSec != null);
+  if (pts.length < 2) return '';
+  const w = 600, h = 150, padT = 10, padB = 22, padL = 4, padR = 4;
+  const times = pts.map((e) => new Date(e.date).getTime());
+  const tMin = Math.min(...times), tMax = Math.max(...times);
+  const tSpan = tMax - tMin || 1;
+  const all = pts.flatMap((e) => [e.adjustedPaceSec, e.actualPaceSec]);
+  const yMin = Math.min(...all) - 20, yMax = Math.max(...all) + 20;
+  const x = (t) => padL + ((t - tMin) / tSpan) * (w - padL - padR);
+  // y inverted: faster pace (lower seconds) plots HIGHER, so improvement rises.
+  const y = (p) => padT + ((p - yMin) / (yMax - yMin)) * (h - padT - padB);
+
+  const line = (key, color, width, dash) => {
+    let d = '';
+    pts.forEach((e, i) => {
+      const px = x(new Date(e.date).getTime()).toFixed(1), py = y(e[key]).toFixed(1);
+      d += (i === 0 ? 'M' : ' L') + ` ${px} ${py}`;
+    });
+    return `<path d="${d}" fill="none" stroke="${color}" stroke-width="${width}" ${dash ? `stroke-dasharray="${dash}"` : ''} vector-effect="non-scaling-stroke" stroke-linejoin="round"/>`;
+  };
+  const dots = pts.map((e) => `<circle cx="${x(new Date(e.date).getTime()).toFixed(1)}" cy="${y(e.adjustedPaceSec).toFixed(1)}" r="3" fill="#6FC7B8"/>`).join('');
+
+  // trend line across the adjusted-pace series
+  let trendPath = '';
+  const tr = paceTrend(pts);
+  if (tr) {
+    const days = pts.map((e) => new Date(e.date).getTime() / 86400000);
+    const ys = pts.map((e) => e.adjustedPaceSec);
+    const xbar = days.reduce((a, b) => a + b, 0) / days.length;
+    const ybar = ys.reduce((a, b) => a + b, 0) / ys.length;
+    const slope = tr.slopePerWeek / 7;
+    const y0 = ybar + slope * (days[0] - xbar);
+    const y1 = ybar + slope * (days[days.length - 1] - xbar);
+    trendPath = `<path d="M ${x(tMin).toFixed(1)} ${y(y0).toFixed(1)} L ${x(tMax).toFixed(1)} ${y(y1).toFixed(1)}" fill="none" stroke="#9B87C4" stroke-width="1.5" stroke-dasharray="5 4" vector-effect="non-scaling-stroke"/>`;
+  }
+
+  const fmtDate = (t) => { const d = new Date(t); return `${d.getMonth() + 1}/${d.getDate()}`; };
+  const labels = `<text x="${padL}" y="${h - 5}" font-size="10" fill="#8B98A5" font-family="JetBrains Mono, monospace" text-anchor="start">${fmtDate(tMin)}</text>
+    <text x="${w - padR}" y="${h - 5}" font-size="10" fill="#8B98A5" font-family="JetBrains Mono, monospace" text-anchor="end">${fmtDate(tMax)}</text>`;
+
+  return `<svg class="chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" style="height:150px">
+    ${line('actualPaceSec', 'rgba(139,152,165,0.5)', 1.5, '3 3')}
+    ${trendPath}
+    ${line('adjustedPaceSec', '#6FC7B8', 2)}
+    ${dots}
+    ${labels}
+  </svg>`;
+}
+
+function exportLog() {
+  const entries = loadLog();
+  if (!entries.length) return;
+  const blob = new Blob([JSON.stringify({ app: 'TruePace', version: 1, exported: new Date().toISOString(), entries }, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `truepace-log-${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function importLog(file) {
+  return file.text().then((txt) => {
+    const data = JSON.parse(txt);
+    const incoming = Array.isArray(data) ? data : data.entries;
+    if (!Array.isArray(incoming)) throw new Error('Not a TruePace export file.');
+    const existing = loadLog();
+    const byId = new Map(existing.map((e) => [e.id, e]));
+    incoming.forEach((e) => { if (e && e.id) byId.set(e.id, e); });
+    const merged = Array.from(byId.values()).sort((a, b) => new Date(a.date) - new Date(b.date));
+    saveLog(merged);
+    return merged.length;
+  });
+}
+
+/* ============================================================
    STATE + RENDER
    ============================================================ */
-const state = { stage: 'upload', error: '', result: null };
+const state = { stage: 'upload', view: 'analyze', error: '', result: null };
 const stageEl = document.getElementById('stage');
+
+document.querySelectorAll('#tabs .tab').forEach((b) => {
+  b.addEventListener('click', () => { state.view = b.dataset.view; render(); });
+});
 
 function factorRowHTML(colorVar, iconName, label, mult, detail) {
   const pct = (mult - 1) * 100;
@@ -557,7 +754,123 @@ function factorRowHTML(colorVar, iconName, label, mult, detail) {
   </div>`;
 }
 
+function renderHistory() {
+  const entries = loadLog();
+
+  if (!entries.length) {
+    stageEl.innerHTML = `
+      <div class="result-card">
+        <div class="empty-log">
+          No runs logged yet.<br />Analyze a run, then tap <b>Save to log</b> to start tracking.
+        </div>
+        <div class="section">
+          <div class="io-row">
+            <button class="io-btn" id="import-btn">Import backup</button>
+            <input type="file" id="import-input" accept=".json,application/json" style="display:none" />
+          </div>
+        </div>
+      </div>`;
+    wireIO();
+    return;
+  }
+
+  const chart = trendChartSVG(entries);
+  const tr = paceTrend(entries);
+  const totalMiles = entries.reduce((s, e) => s + (e.distMiles || 0), 0);
+  const withAdj = entries.filter((e) => e.adjustedPaceSec != null);
+  const best = withAdj.length ? Math.min(...withAdj.map((e) => e.adjustedPaceSec)) : null;
+  const avgTax = entries.filter((e) => e.combined != null).reduce((s, e, _, a) => s + (e.combined - 1) * 100 / a.length, 0);
+
+  let trendHTML = '';
+  if (tr) {
+    const perWeek = tr.slopePerWeek;
+    const improving = perWeek < -0.5, worsening = perWeek > 0.5;
+    const cls = improving ? 'trend-good' : worsening ? 'trend-bad' : 'trend-flat';
+    const word = improving ? 'improving' : worsening ? 'slipping' : 'holding steady';
+    const rate = Math.abs(perWeek) < 0.5 ? '' : ` ${formatPace(Math.abs(perWeek)).replace(/^0:/, '')} sec/mi per week`;
+    trendHTML = `<div class="trend-line ${cls}">Adjusted pace ${word}${rate} — across ${tr.n} runs over ${Math.round(tr.spanDays)} days.</div>`;
+  } else {
+    trendHTML = `<div class="trend-line trend-flat">Log at least 3 runs to see a trend.</div>`;
+  }
+
+  const rows = entries.slice().reverse().map((e) => {
+    const d = new Date(e.date);
+    const dateStr = `${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} · ${d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`;
+    const tax = e.combined != null ? `${formatPct(e.combined)} conditions` : '';
+    return `<div class="log-row">
+      <div class="log-main">
+        <div class="log-date">${escapeHtml(dateStr)}${e.manualEntry ? ' · manual' : ''}</div>
+        <div class="log-pace">${formatPace(e.actualPaceSec)}<span class="arrow">→</span><span class="adj">${formatPace(e.adjustedPaceSec)}</span> <span style="font-size:11px;color:var(--text-dim);font-weight:400">/mi</span></div>
+        <div class="log-meta">${(e.distMiles || 0).toFixed(2)} mi · ${formatDuration(e.durationSec)}${tax ? ' · ' + tax : ''}</div>
+      </div>
+      <button class="del-btn" data-id="${escapeHtml(e.id)}" aria-label="Delete run">×</button>
+    </div>`;
+  }).join('');
+
+  stageEl.innerHTML = `
+    <div class="result-card">
+      ${chart ? `<div class="section">
+        <div class="section-title">Adjusted Pace Over Time</div>
+        ${chart}
+        <div class="log-meta" style="margin-top:8px">
+          <span style="color:var(--ideal)">━</span> adjusted &nbsp;
+          <span style="color:var(--text-dim)">╌</span> actual &nbsp;
+          <span style="color:var(--altitude)">╌</span> trend &nbsp;· faster is higher
+        </div>
+        ${trendHTML}
+      </div>` : `<div class="section">${trendHTML}</div>`}
+      <div class="stats-row">
+        <div class="stat"><div class="stat-val">${entries.length}</div><div class="stat-key">Runs</div></div>
+        <div class="stat"><div class="stat-val">${totalMiles.toFixed(1)}</div><div class="stat-key">Miles</div></div>
+        <div class="stat"><div class="stat-val">${best != null ? formatPace(best) : '—'}</div><div class="stat-key">Best adj</div></div>
+      </div>
+      <div class="section">
+        <div class="section-title">Runs · actual → adjusted</div>
+        ${rows}
+      </div>
+      <div class="section">
+        <div class="note">Conditions have cost you an average of ${avgTax.toFixed(1)}% across these runs. Adjusted pace is the fitness signal — it's the only column comparable between a cool morning and a monsoon afternoon.</div>
+        <div class="io-row">
+          <button class="io-btn" id="export-btn">Export backup</button>
+          <button class="io-btn" id="import-btn">Import backup</button>
+          <input type="file" id="import-input" accept=".json,application/json" style="display:none" />
+        </div>
+        <div class="note" style="margin-top:10px">Saved on this device only. Home-screen web apps are exempt from Safari's 7-day storage wipe, but iOS can still clear data under storage pressure — export occasionally.</div>
+      </div>
+    </div>`;
+
+  document.querySelectorAll('.del-btn').forEach((b) => {
+    b.addEventListener('click', () => {
+      if (confirm('Delete this run from your log?')) { removeFromLog(b.dataset.id); render(); }
+    });
+  });
+  wireIO();
+}
+
+function wireIO() {
+  const exp = document.getElementById('export-btn');
+  if (exp) exp.addEventListener('click', exportLog);
+  const imp = document.getElementById('import-btn');
+  const impIn = document.getElementById('import-input');
+  if (imp && impIn) {
+    imp.addEventListener('click', () => impIn.click());
+    impIn.addEventListener('change', (e) => {
+      if (!e.target.files[0]) return;
+      importLog(e.target.files[0])
+        .then((n) => { alert(`Imported. ${n} runs in your log.`); render(); })
+        .catch((err) => alert('Import failed: ' + (err.message || 'bad file')));
+    });
+  }
+}
+
 function render() {
+  // keep tab bar in sync
+  document.querySelectorAll('#tabs .tab').forEach((b) => {
+    b.classList.toggle('active', b.dataset.view === state.view);
+  });
+
+  if (state.view === 'history') { renderHistory(); return; }
+
   if (state.stage === 'upload') {
     stageEl.innerHTML = `
       <div class="upload-zone" id="upload-zone" role="button" tabindex="0">
@@ -647,10 +960,23 @@ function render() {
           ${(w.cloudCover != null && w.cloudCover >= 55 && r.computed.breakdown.heat > 1.001) ? `<div class="estimate-note">${icon('alert', 13)} <span>${Math.round(w.cloudCover)}% cloud cover${w.solarWm2 != null ? `, ${Math.round(w.solarWm2)} W/m² sun` : ''}. The WBGT formula assumes moderate sun, so the ${formatPct(r.computed.breakdown.heat)} heat figure is likely an overestimate — read it as a ceiling.</span></div>` : ''}
           <div class="note">Grade uses the Minetti et al. (2002) cost curve and needs nothing but your file — it bottoms out around an 18% downhill and costs ~1.66× flat at a 10% climb. Altitude reads elevation straight from the track and maps it to empirical non-acclimated race-pace slowdown. Heat estimates WBGT from temperature and humidity (the Bureau of Meteorology / ACSM formula) and converts it to pace loss using Ely et al. (2007), scaled to your own pace since slower runners lose more. Caveat worth knowing: that WBGT formula assumes moderate sun and light wind — it overestimates heat stress on cloudy, windy, or early-morning runs. Wind resolves against your GPS heading segment-by-segment, so direction matters. Barometric pressure was evaluated but isn't included — day-to-day swings are physiologically negligible next to elevation.</div>
         </div>
-        <div style="padding:0 24px 24px"><button class="reset-btn" id="reset-btn">${icon('reset', 13)} Analyze another run</button></div>
+        <div style="padding:0 24px 24px">
+          <button class="save-btn" id="save-btn">${logHas(r.startTime.toISOString()) ? 'Saved to log ✓ — update' : 'Save to log'}</button>
+          <button class="reset-btn" id="reset-btn">${icon('reset', 13)} Analyze another run</button>
+        </div>
       </div>`;
     document.getElementById('reset-btn').addEventListener('click', reset);
     document.getElementById('apply-btn').addEventListener('click', applyManual);
+    const saveBtn = document.getElementById('save-btn');
+    saveBtn.addEventListener('click', () => {
+      const ok = addToLog(entryFromResult(r));
+      if (ok) {
+        saveBtn.textContent = 'Saved to log ✓';
+        saveBtn.disabled = true;
+      } else {
+        saveBtn.textContent = 'Save failed — storage blocked';
+      }
+    });
   }
 }
 
