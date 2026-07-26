@@ -117,6 +117,20 @@ button.del-btn:hover { border-color:var(--error); color:var(--error); }
 button.io-btn { flex:1; background:transparent; border:1px solid var(--border); color:var(--text-dim); padding:10px; font-family:'Inter',sans-serif; font-size:12px; font-weight:500; border-radius:9px; cursor:pointer; }
 button.io-btn:hover { border-color:var(--text-dim); color:var(--text); }
 .empty-log { text-align:center; padding:36px 20px; color:var(--text-dim); font-size:13px; line-height:1.6; }
+.mode-switch { display:flex; gap:4px; background:var(--surface-2); border-radius:8px; padding:3px; }
+button.mode-btn { background:transparent; border:none; color:var(--text-dim); padding:5px 10px; font-family:'JetBrains Mono',monospace; font-size:10px; font-weight:600; border-radius:6px; cursor:pointer; letter-spacing:.03em; }
+button.mode-btn.active { background:var(--surface); color:var(--ideal); }
+.toggle-row { display:flex; align-items:flex-start; gap:14px; justify-content:space-between; padding:14px 0; border-bottom:1px solid var(--border); cursor:pointer; }
+.toggle-row:last-child { border-bottom:none; }
+.toggle-label { font-size:14px; font-weight:600; }
+.toggle-sub { font-size:12px; color:var(--text-dim); margin-top:5px; line-height:1.55; }
+.toggle-row input[type="checkbox"] { flex-shrink:0; width:44px; height:26px; appearance:none; -webkit-appearance:none; background:var(--surface-2); border:1px solid var(--border); border-radius:13px; position:relative; cursor:pointer; margin-top:2px; transition:background .15s ease; }
+.toggle-row input[type="checkbox"]:checked { background:var(--contour); border-color:var(--contour); }
+.toggle-row input[type="checkbox"]::after { content:''; position:absolute; top:2px; left:2px; width:20px; height:20px; border-radius:50%; background:var(--text); transition:transform .15s ease; }
+.toggle-row input[type="checkbox"]:checked::after { transform:translateX(18px); background:#0F1720; }
+.in-field select { background:transparent; border:none; border-bottom:1px solid var(--border); color:var(--text); font-family:'JetBrains Mono',monospace; font-size:15px; font-weight:600; padding:4px 0; width:100%; }
+.in-field select:focus { outline:none; border-bottom-color:var(--contour); }
+.in-field select option { background:var(--surface); color:var(--text); }
 .estimate-note { margin-top:12px; font-size:12px; color:var(--estimate); line-height:1.6; display:flex; gap:6px; align-items:flex-start; }
 .note { font-size:12px; color:var(--text-dim); line-height:1.6; margin-top:12px; }
 button.reset-btn { width:100%; background:transparent; border:1px solid var(--border); color:var(--text-dim); padding:13px; font-family:'Inter',sans-serif; font-size:13px; font-weight:500; border-radius:10px; cursor:pointer; margin-top:18px; }
@@ -134,6 +148,7 @@ svg.chart { width:100%; height:110px; display:block; }
   <div class="tabs" id="tabs">
     <button class="tab active" data-view="analyze">Analyze</button>
     <button class="tab" data-view="history">History</button>
+    <button class="tab" data-view="settings">Settings</button>
   </div>
   <div id="stage"></div>
   <div class="footnote">Grade &amp; altitude computed from your file · weather auto-fetches via Open-Meteo when self-hosted, manual entry otherwise · runs in your browser, files aren't uploaded anywhere</div>
@@ -271,22 +286,56 @@ const ALT_TABLE_FT = [
   [0, 1.000], [1000, 1.003], [2000, 1.008], [3000, 1.016], [4000, 1.027],
   [5000, 1.040], [6000, 1.054], [7500, 1.075], [10000, 1.140], [12000, 1.200],
 ];
-function altitudeMultiplier(elevationM) {
+function altitudeMultiplier(elevationM, acclimatized) {
   if (elevationM == null || isNaN(elevationM)) return 1;
   const ft = Math.max(0, elevationM * 3.28084);
   const t = ALT_TABLE_FT;
-  if (ft <= t[0][0]) return t[0][1];
-  const last = t[t.length - 1];
-  if (ft >= last[0]) {
-    const prev = t[t.length - 2];
-    const slope = (last[1] - prev[1]) / (last[0] - prev[0]);
-    return last[1] + slope * (ft - last[0]);
+  let base;
+  if (ft <= t[0][0]) base = t[0][1];
+  else {
+    const last = t[t.length - 1];
+    if (ft >= last[0]) {
+      const prev = t[t.length - 2];
+      const slope = (last[1] - prev[1]) / (last[0] - prev[0]);
+      base = last[1] + slope * (ft - last[0]);
+    } else {
+      base = 1;
+      for (let i = 0; i < t.length - 1; i++) {
+        const x1 = t[i][0], y1 = t[i][1], x2 = t[i + 1][0], y2 = t[i + 1][1];
+        if (ft >= x1 && ft <= x2) { base = y1 + ((ft - x1) / (x2 - x1)) * (y2 - y1); break; }
+      }
+    }
   }
-  for (let i = 0; i < t.length - 1; i++) {
-    const x1 = t[i][0], y1 = t[i][1], x2 = t[i + 1][0], y2 = t[i + 1][1];
-    if (ft >= x1 && ft <= x2) return y1 + ((ft - x1) / (x2 - x1)) * (y2 - y1);
-  }
-  return 1;
+  // The ALT_TABLE_FT anchors assume NO acclimatization. Two to three weeks
+  // at altitude recovers roughly half the loss, so someone who lives at
+  // elevation should not be charged the visitor's penalty.
+  const penalty = base - 1;
+  return 1 + (acclimatized ? penalty * 0.5 : penalty);
+}
+
+/* ---------------- DISTANCE: Riegel normalization ----------------
+   Riegel (Runner's World 1977; American Scientist 1981):
+     T2 = T1 * (D2/D1)^1.06
+   Dividing both sides by distance converts it to pace:
+     pace2 = pace1 * (D2/D1)^0.06
+
+   This is NOT a conditions adjustment and is deliberately kept out of the
+   conditions multiplier stack. Grade/heat/altitude/wind/air are things that
+   were done TO you; distance is a property of the effort itself. Folding
+   them together would make "conditions cost you X%" meaningless.
+
+   The load-bearing caveat: Riegel assumes a genuine race effort. It cannot
+   distinguish an easy long run from a hard short one, so an easy 10-miler
+   will normalize to a flattering number. It is only meaningful for
+   comparing runs of SIMILAR effort. The exponent also varies -- roughly
+   1.04 for elites, 1.07-1.08 for newer runners -- so 1.06 is the middle,
+   not a personal fit.
+------------------------------------------------------------------- */
+const RIEGEL_EXP = 1.06;
+function normalizePace(paceSecPerMile, actualMiles, refMiles) {
+  if (paceSecPerMile == null || !isFinite(paceSecPerMile) || paceSecPerMile <= 0) return null;
+  if (!actualMiles || !refMiles || actualMiles <= 0 || refMiles <= 0) return null;
+  return paceSecPerMile * Math.pow(refMiles / actualMiles, RIEGEL_EXP - 1);
 }
 function windMultiplier(runnerMps, headwindMps) {
   if (!runnerMps || runnerMps <= 0 || headwindMps == null || isNaN(headwindMps)) return 1;
@@ -337,6 +386,12 @@ function parseTCX(doc) {
     };
   });
 }
+// Instantaneous speed below this counts as stopped. 0.5 m/s is ~53 min/mile
+// -- far slower than any real walking, so it catches traffic lights and
+// water stops without ever penalising a genuinely slow segment. GPS drift
+// while standing still typically reads under this too.
+const STOPPED_SPEED_MPS = 0.5;
+
 function buildSegments(points, binMeters) {
   const withDist = [{ ...points[0], cumDist: 0 }];
   for (let i = 1; i < points.length; i++) {
@@ -344,20 +399,32 @@ function buildSegments(points, binMeters) {
     withDist.push({ ...points[i], cumDist: withDist[i - 1].cumDist + d });
   }
   const segments = [];
-  let binStart = withDist[0];
+  let binStartIdx = 0;
   for (let i = 1; i < withDist.length; i++) {
     const isLast = i === withDist.length - 1;
-    if (withDist[i].cumDist - binStart.cumDist >= binMeters || isLast) {
-      const a = binStart, b = withDist[i];
+    if (withDist[i].cumDist - withDist[binStartIdx].cumDist >= binMeters || isLast) {
+      const a = withDist[binStartIdx], b = withDist[i];
       const dist = b.cumDist - a.cumDist;
       if (dist > 0.5 && a.time && b.time) {
         const dt = (b.time.getTime() - a.time.getTime()) / 1000;
+        // Stopped time is measured on the RAW points inside this bin. Doing
+        // it at bin level would smear a 40s stop across 50m of running and
+        // miss it entirely.
+        let stoppedDt = 0;
+        for (let j = binStartIdx + 1; j <= i; j++) {
+          const p0 = withDist[j - 1], p1 = withDist[j];
+          if (!p0.time || !p1.time) continue;
+          const subDt = (p1.time.getTime() - p0.time.getTime()) / 1000;
+          const subD = p1.cumDist - p0.cumDist;
+          if (subDt > 0 && subD / subDt < STOPPED_SPEED_MPS) stoppedDt += subDt;
+        }
+        if (stoppedDt > dt) stoppedDt = dt;
         const hasElevation = a.ele != null && b.ele != null && !isNaN(a.ele) && !isNaN(b.ele);
         let grade = hasElevation ? (b.ele - a.ele) / dist : 0;
         grade = Math.max(-0.45, Math.min(0.45, grade));
-        segments.push({ distance: dist, dt, grade, bearing: bearingDegrees(a.lat, a.lon, b.lat, b.lon) });
+        segments.push({ distance: dist, dt, stoppedDt, grade, bearing: bearingDegrees(a.lat, a.lon, b.lat, b.lon) });
       }
-      binStart = b;
+      binStartIdx = i;
     }
   }
   return segments;
@@ -467,15 +534,22 @@ function mergedConditions(r) {
 /* ============================================================
    MAIN COMPUTATION
    ============================================================ */
-function computeAdjustedPace(segments, weather, pm25) {
-  let totalDist = 0, totalTime = 0, adjustedTime = 0, gradeWeightSum = 0, windWeightSum = 0;
+function computeAdjustedPace(segments, weather, pm25, settings) {
+  const s = settings || defaultSettings();
+  let totalDist = 0, elapsedTime = 0, stoppedTime = 0, adjustedTime = 0, gradeWeightSum = 0, windWeightSum = 0;
   const windSpeedMps = weather && weather.windSpeedMps != null && !isNaN(weather.windSpeedMps) ? weather.windSpeedMps : 0;
   const windDirDeg = weather && weather.windDirDeg != null && !isNaN(weather.windDirDeg) ? weather.windDirDeg : 0;
 
   segments.forEach((seg) => {
     if (seg.dt <= 0) return;
-    totalDist += seg.distance; totalTime += seg.dt;
-    const speedMps = seg.distance / seg.dt;
+    totalDist += seg.distance;
+    elapsedTime += seg.dt;
+    const segStopped = s.excludeStopped ? (seg.stoppedDt || 0) : 0;
+    stoppedTime += segStopped;
+    // Stopped time is removed outright rather than adjusted -- standing at a
+    // crosswalk isn't a slow mile, it's not running at all.
+    const movingDt = Math.max(0.001, seg.dt - segStopped);
+    const speedMps = seg.distance / movingDt;
     const gMult = gradeCostRatio(seg.grade);
     let wMult = 1;
     if (windSpeedMps > 0) {
@@ -483,30 +557,37 @@ function computeAdjustedPace(segments, weather, pm25) {
       const headwindComp = windSpeedMps * Math.cos(angle);
       wMult = windMultiplier(speedMps, headwindComp);
     }
-    adjustedTime += seg.dt / (gMult * wMult);
-    gradeWeightSum += gMult * seg.dt;
-    windWeightSum += wMult * seg.dt;
+    adjustedTime += movingDt / (gMult * wMult);
+    gradeWeightSum += gMult * movingDt;
+    windWeightSum += wMult * movingDt;
   });
 
-  const avgGradeMult = totalTime > 0 ? gradeWeightSum / totalTime : 1;
-  const avgWindMult = totalTime > 0 ? windWeightSum / totalTime : 1;
+  const movingTime = Math.max(0.001, elapsedTime - stoppedTime);
+  const avgGradeMult = movingTime > 0 ? gradeWeightSum / movingTime : 1;
+  const avgWindMult = movingTime > 0 ? windWeightSum / movingTime : 1;
+  // Exact aggregate of the per-segment grade+wind work. Stored on log entries
+  // so settings changes can be replayed without re-parsing the GPX.
+  const gradeWindFactor = adjustedTime > 0 ? movingTime / adjustedTime : 1;
 
-  // Heat sensitivity scales with how fast the runner actually ran, so it's
-  // resolved here rather than per-segment. Uses ACTUAL pace, not adjusted
-  // pace, which keeps this non-circular.
   const distMiles = totalDist / 1609.34;
-  const actualPaceSecPerMile = distMiles > 0 ? totalTime / distMiles : null;
+  const actualPaceSecPerMile = distMiles > 0 ? movingTime / distMiles : null;
   const heatMult = weather ? heatMultiplier(weather.tempF, weather.rh, actualPaceSecPerMile) : 1;
   const wbgtC = (weather && weather.tempF != null && weather.rh != null)
     ? wbgtApproxC(((weather.tempF - 32) * 5) / 9, weather.rh) : null;
 
-  const altMult = weather ? altitudeMultiplier(weather.elevationM) : 1;
+  const altMult = weather ? altitudeMultiplier(weather.elevationM, s.acclimatized) : 1;
   const aqMult = aqiMultiplier(pm25);
   const finalAdjustedTime = adjustedTime / (heatMult * altMult * aqMult);
-  const combinedMultiplier = finalAdjustedTime > 0 ? totalTime / finalAdjustedTime : 1;
+  const combinedMultiplier = finalAdjustedTime > 0 ? movingTime / finalAdjustedTime : 1;
+
+  const adjustedPaceSec = distMiles > 0 ? finalAdjustedTime / distMiles : null;
+  const normalizedPaceSec = normalizePace(adjustedPaceSec, distMiles, s.refDistanceMi);
 
   return {
-    totalDist, totalTime, finalAdjustedTime, combinedMultiplier, wbgtC,
+    totalDist, elapsedTime, movingTime, stoppedTime,
+    totalTime: movingTime, // pace basis
+    finalAdjustedTime, combinedMultiplier, wbgtC, gradeWindFactor,
+    adjustedPaceSec, normalizedPaceSec,
     heatSensitivity: heatSensitivityPer5C(actualPaceSecPerMile),
     breakdown: { grade: avgGradeMult, heat: heatMult, altitude: altMult, wind: avgWindMult, aqi: aqMult },
   };
@@ -576,6 +657,25 @@ function elevationChartSVG(points) {
    real backup and is deliberately prominent.
    ============================================================ */
 const LOG_KEY = 'truepace:log:v1';
+const SETTINGS_KEY = 'truepace:settings:v1';
+
+function defaultSettings() {
+  return { acclimatized: false, excludeStopped: true, refDistanceMi: 5 };
+}
+function loadSettings() {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (!raw) return defaultSettings();
+    return Object.assign(defaultSettings(), JSON.parse(raw) || {});
+  } catch (e) {
+    console.error('settings read failed', e);
+    return defaultSettings();
+  }
+}
+function saveSettings(s) {
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); return true; }
+  catch (e) { console.error('settings write failed', e); return false; }
+}
 
 function loadLog() {
   try {
@@ -610,6 +710,10 @@ function removeFromLog(id) {
   saveLog(loadLog().filter((e) => e.id !== id));
 }
 
+// Entries store RAW, settings-independent inputs. Adjusted pace is derived on
+// read via deriveEntry(), so flipping "acclimatized" or the reference distance
+// updates the entire back-history instead of leaving old runs computed under
+// old assumptions.
 function entryFromResult(r) {
   const distMiles = r.computed.totalDist / 1609.34;
   const w = r.weather || {};
@@ -617,30 +721,59 @@ function entryFromResult(r) {
     id: r.startTime.toISOString(),
     date: r.startTime.toISOString(),
     distMiles: +distMiles.toFixed(3),
-    durationSec: Math.round(r.computed.totalTime),
-    actualPaceSec: distMiles > 0 ? r.computed.totalTime / distMiles : null,
-    adjustedPaceSec: distMiles > 0 ? r.computed.finalAdjustedTime / distMiles : null,
-    combined: r.computed.combinedMultiplier,
+    elapsedSec: Math.round(r.computed.elapsedTime),
+    stoppedSec: Math.round(r.computed.stoppedTime),
     gainFt: Math.round(r.gainFt),
-    breakdown: r.computed.breakdown,
-    wbgtC: r.computed.wbgtC,
-    conditions: {
-      tempF: w.tempF, rh: w.rh, windMph: w.windSpeedMph, windDirDeg: w.windDirDeg,
-      pm25: r.pm25, elevationFt: w.elevationM != null ? Math.round(w.elevationM * 3.28084) : null,
-      cloudCover: w.cloudCover,
-    },
+    lossFt: Math.round(r.lossFt),
+    // settings-independent aggregates
+    gradeWindFactor: r.computed.gradeWindFactor,
+    gradeMult: r.computed.breakdown.grade,
+    windMult: r.computed.breakdown.wind,
+    // raw conditions, so heat/altitude/air can be recomputed
+    tempF: w.tempF != null ? w.tempF : null,
+    rh: w.rh != null ? w.rh : null,
+    windMph: w.windSpeedMph != null ? w.windSpeedMph : null,
+    windDirDeg: w.windDirDeg != null ? w.windDirDeg : null,
+    pm25: r.pm25 != null ? r.pm25 : null,
+    elevationFt: w.elevationM != null ? Math.round(w.elevationM * 3.28084) : null,
+    cloudCover: w.cloudCover != null ? w.cloudCover : null,
     lat: r.lat, lon: r.lon,
     manualEntry: Object.values(r.manual).some((v) => v != null),
+    schema: 2,
   };
 }
 
-// Least-squares slope of adjusted pace vs. time. Negative slope = getting
-// faster in like-for-like conditions, which is the whole point of the app:
-// actual pace is mostly weather noise, adjusted pace is the fitness signal.
-function paceTrend(entries) {
-  const pts = entries
-    .filter((e) => e.adjustedPaceSec != null)
-    .map((e) => ({ t: new Date(e.date).getTime() / 86400000, y: e.adjustedPaceSec }));
+// Replays a stored entry under the current settings.
+function deriveEntry(e, s) {
+  const dist = e.distMiles || 0;
+  const elapsed = e.elapsedSec != null ? e.elapsedSec : e.durationSec;
+  const stopped = e.stoppedSec || 0;
+  const timeSec = s.excludeStopped ? Math.max(1, elapsed - stopped) : elapsed;
+  const actualPaceSec = dist > 0 ? timeSec / dist : null;
+
+  const gw = e.gradeWindFactor != null ? e.gradeWindFactor : 1;
+  const heat = heatMultiplier(e.tempF, e.rh, actualPaceSec);
+  const altitude = altitudeMultiplier(e.elevationFt != null ? e.elevationFt / 3.28084 : null, s.acclimatized);
+  const aqi = aqiMultiplier(e.pm25);
+  const combined = gw * heat * altitude * aqi;
+  const adjustedPaceSec = actualPaceSec != null && combined > 0 ? actualPaceSec / combined : null;
+  const normalizedPaceSec = normalizePace(adjustedPaceSec, dist, s.refDistanceMi);
+
+  return {
+    actualPaceSec, adjustedPaceSec, normalizedPaceSec, combined, timeSec,
+    breakdown: { grade: e.gradeMult != null ? e.gradeMult : 1, heat, altitude, wind: e.windMult != null ? e.windMult : 1, aqi },
+  };
+}
+
+// Least-squares slope of pace vs. time. Negative slope = getting faster in
+// like-for-like conditions, which is the whole point of the app: actual pace
+// is mostly weather noise, adjusted pace is the fitness signal.
+// `rows` are entries already merged with their derived values.
+function paceTrend(rows, key) {
+  const k = key || 'adjustedPaceSec';
+  const pts = rows
+    .filter((e) => e[k] != null && isFinite(e[k]))
+    .map((e) => ({ t: new Date(e.date).getTime() / 86400000, y: e[k] }));
   if (pts.length < 3) return null;
   const n = pts.length;
   const xbar = pts.reduce((s, p) => s + p.t, 0) / n;
@@ -653,14 +786,15 @@ function paceTrend(entries) {
   return { slopePerWeek: slopePerDay * 7, spanDays, n };
 }
 
-function trendChartSVG(entries) {
-  const pts = entries.filter((e) => e.adjustedPaceSec != null && e.actualPaceSec != null);
+function trendChartSVG(rows, primaryKey) {
+  const pk = primaryKey || 'adjustedPaceSec';
+  const pts = rows.filter((e) => e[pk] != null && isFinite(e[pk]) && e.actualPaceSec != null);
   if (pts.length < 2) return '';
   const w = 600, h = 150, padT = 10, padB = 22, padL = 4, padR = 4;
   const times = pts.map((e) => new Date(e.date).getTime());
   const tMin = Math.min(...times), tMax = Math.max(...times);
   const tSpan = tMax - tMin || 1;
-  const all = pts.flatMap((e) => [e.adjustedPaceSec, e.actualPaceSec]);
+  const all = pts.flatMap((e) => [e[pk], e.actualPaceSec]);
   const yMin = Math.min(...all) - 20, yMax = Math.max(...all) + 20;
   const x = (t) => padL + ((t - tMin) / tSpan) * (w - padL - padR);
   // y inverted: faster pace (lower seconds) plots HIGHER, so improvement rises.
@@ -674,14 +808,13 @@ function trendChartSVG(entries) {
     });
     return `<path d="${d}" fill="none" stroke="${color}" stroke-width="${width}" ${dash ? `stroke-dasharray="${dash}"` : ''} vector-effect="non-scaling-stroke" stroke-linejoin="round"/>`;
   };
-  const dots = pts.map((e) => `<circle cx="${x(new Date(e.date).getTime()).toFixed(1)}" cy="${y(e.adjustedPaceSec).toFixed(1)}" r="3" fill="#6FC7B8"/>`).join('');
+  const dots = pts.map((e) => `<circle cx="${x(new Date(e.date).getTime()).toFixed(1)}" cy="${y(e[pk]).toFixed(1)}" r="3" fill="#6FC7B8"/>`).join('');
 
-  // trend line across the adjusted-pace series
   let trendPath = '';
-  const tr = paceTrend(pts);
+  const tr = paceTrend(pts, pk);
   if (tr) {
     const days = pts.map((e) => new Date(e.date).getTime() / 86400000);
-    const ys = pts.map((e) => e.adjustedPaceSec);
+    const ys = pts.map((e) => e[pk]);
     const xbar = days.reduce((a, b) => a + b, 0) / days.length;
     const ybar = ys.reduce((a, b) => a + b, 0) / ys.length;
     const slope = tr.slopePerWeek / 7;
@@ -697,7 +830,7 @@ function trendChartSVG(entries) {
   return `<svg class="chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" style="height:150px">
     ${line('actualPaceSec', 'rgba(139,152,165,0.5)', 1.5, '3 3')}
     ${trendPath}
-    ${line('adjustedPaceSec', '#6FC7B8', 2)}
+    ${line(pk, '#6FC7B8', 2)}
     ${dots}
     ${labels}
   </svg>`;
@@ -734,7 +867,7 @@ function importLog(file) {
 /* ============================================================
    STATE + RENDER
    ============================================================ */
-const state = { stage: 'upload', view: 'analyze', error: '', result: null };
+const state = { stage: 'upload', view: 'analyze', paceMode: 'adjusted', error: '', result: null };
 const stageEl = document.getElementById('stage');
 
 document.querySelectorAll('#tabs .tab').forEach((b) => {
@@ -756,6 +889,7 @@ function factorRowHTML(colorVar, iconName, label, mult, detail) {
 
 function renderHistory() {
   const entries = loadLog();
+  const s = loadSettings();
 
   if (!entries.length) {
     stageEl.innerHTML = `
@@ -774,12 +908,21 @@ function renderHistory() {
     return;
   }
 
-  const chart = trendChartSVG(entries);
-  const tr = paceTrend(entries);
-  const totalMiles = entries.reduce((s, e) => s + (e.distMiles || 0), 0);
-  const withAdj = entries.filter((e) => e.adjustedPaceSec != null);
-  const best = withAdj.length ? Math.min(...withAdj.map((e) => e.adjustedPaceSec)) : null;
-  const avgTax = entries.filter((e) => e.combined != null).reduce((s, e, _, a) => s + (e.combined - 1) * 100 / a.length, 0);
+  // Every displayed number is derived fresh from current settings.
+  const rowsData = entries.map((e) => Object.assign({}, e, deriveEntry(e, s)));
+  const pk = state.paceMode === 'normalized' ? 'normalizedPaceSec' : 'adjustedPaceSec';
+  const pkLabel = state.paceMode === 'normalized' ? `${s.refDistanceMi}-mile equivalent` : 'adjusted';
+
+  const chart = trendChartSVG(rowsData, pk);
+  const tr = paceTrend(rowsData, pk);
+  const totalMiles = rowsData.reduce((s2, e) => s2 + (e.distMiles || 0), 0);
+  const withAdj = rowsData.filter((e) => e[pk] != null && isFinite(e[pk]));
+  const best = withAdj.length ? Math.min(...withAdj.map((e) => e[pk])) : null;
+  const avgTax = rowsData.length ? rowsData.reduce((a, e) => a + ((e.combined || 1) - 1) * 100, 0) / rowsData.length : 0;
+  const dists = rowsData.map((e) => e.distMiles || 0);
+  const dMin = Math.min(...dists), dMax = Math.max(...dists);
+  const wideSpread = dMax > 0 && dMax / Math.max(0.1, dMin) >= 1.6;
+  const totalStopped = rowsData.reduce((a, e) => a + (e.stoppedSec || 0), 0);
 
   let trendHTML = '';
   if (tr) {
@@ -787,21 +930,24 @@ function renderHistory() {
     const improving = perWeek < -0.5, worsening = perWeek > 0.5;
     const cls = improving ? 'trend-good' : worsening ? 'trend-bad' : 'trend-flat';
     const word = improving ? 'improving' : worsening ? 'slipping' : 'holding steady';
-    const rate = Math.abs(perWeek) < 0.5 ? '' : ` ${formatPace(Math.abs(perWeek)).replace(/^0:/, '')} sec/mi per week`;
-    trendHTML = `<div class="trend-line ${cls}">Adjusted pace ${word}${rate} — across ${tr.n} runs over ${Math.round(tr.spanDays)} days.</div>`;
+    const rate = Math.abs(perWeek) < 0.5 ? '' : ` ${Math.abs(perWeek).toFixed(1)} sec/mi per week`;
+    trendHTML = `<div class="trend-line ${cls}">Your ${pkLabel} pace is ${word}${rate} — across ${tr.n} runs over ${Math.round(tr.spanDays)} days.</div>`;
   } else {
     trendHTML = `<div class="trend-line trend-flat">Log at least 3 runs to see a trend.</div>`;
   }
 
-  const rows = entries.slice().reverse().map((e) => {
+  const rows = rowsData.slice().reverse().map((e) => {
     const d = new Date(e.date);
     const dateStr = `${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} · ${d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`;
     const tax = e.combined != null ? `${formatPct(e.combined)} conditions` : '';
+    const stop = e.stoppedSec ? ` · ${Math.round(e.stoppedSec)}s stopped` : '';
+    const norm = e.normalizedPaceSec != null && state.paceMode === 'normalized'
+      ? ` <span style="color:var(--text-dim);font-size:11px">(${formatPace(e.adjustedPaceSec)} raw adj)</span>` : '';
     return `<div class="log-row">
       <div class="log-main">
         <div class="log-date">${escapeHtml(dateStr)}${e.manualEntry ? ' · manual' : ''}</div>
-        <div class="log-pace">${formatPace(e.actualPaceSec)}<span class="arrow">→</span><span class="adj">${formatPace(e.adjustedPaceSec)}</span> <span style="font-size:11px;color:var(--text-dim);font-weight:400">/mi</span></div>
-        <div class="log-meta">${(e.distMiles || 0).toFixed(2)} mi · ${formatDuration(e.durationSec)}${tax ? ' · ' + tax : ''}</div>
+        <div class="log-pace">${formatPace(e.actualPaceSec)}<span class="arrow">→</span><span class="adj">${formatPace(e[pk])}</span> <span style="font-size:11px;color:var(--text-dim);font-weight:400">/mi</span>${norm}</div>
+        <div class="log-meta">${(e.distMiles || 0).toFixed(2)} mi · ${formatDuration(e.timeSec)}${tax ? ' · ' + tax : ''}${stop}</div>
       </div>
       <button class="del-btn" data-id="${escapeHtml(e.id)}" aria-label="Delete run">×</button>
     </div>`;
@@ -810,26 +956,33 @@ function renderHistory() {
   stageEl.innerHTML = `
     <div class="result-card">
       ${chart ? `<div class="section">
-        <div class="section-title">Adjusted Pace Over Time</div>
+        <div class="section-title-row">
+          <div class="section-title">Pace Over Time</div>
+          <div class="mode-switch">
+            <button class="mode-btn ${state.paceMode !== 'normalized' ? 'active' : ''}" data-mode="adjusted">Adjusted</button>
+            <button class="mode-btn ${state.paceMode === 'normalized' ? 'active' : ''}" data-mode="normalized">${s.refDistanceMi} mi eq</button>
+          </div>
+        </div>
         ${chart}
         <div class="log-meta" style="margin-top:8px">
-          <span style="color:var(--ideal)">━</span> adjusted &nbsp;
+          <span style="color:var(--ideal)">━</span> ${escapeHtml(pkLabel)} &nbsp;
           <span style="color:var(--text-dim)">╌</span> actual &nbsp;
           <span style="color:var(--altitude)">╌</span> trend &nbsp;· faster is higher
         </div>
         ${trendHTML}
       </div>` : `<div class="section">${trendHTML}</div>`}
       <div class="stats-row">
-        <div class="stat"><div class="stat-val">${entries.length}</div><div class="stat-key">Runs</div></div>
+        <div class="stat"><div class="stat-val">${rowsData.length}</div><div class="stat-key">Runs</div></div>
         <div class="stat"><div class="stat-val">${totalMiles.toFixed(1)}</div><div class="stat-key">Miles</div></div>
-        <div class="stat"><div class="stat-val">${best != null ? formatPace(best) : '—'}</div><div class="stat-key">Best adj</div></div>
+        <div class="stat"><div class="stat-val">${best != null ? formatPace(best) : '—'}</div><div class="stat-key">Best ${state.paceMode === 'normalized' ? 'eq' : 'adj'}</div></div>
       </div>
       <div class="section">
-        <div class="section-title">Runs · actual → adjusted</div>
+        <div class="section-title">Runs · actual → ${escapeHtml(pkLabel)}</div>
         ${rows}
       </div>
       <div class="section">
-        <div class="note">Conditions have cost you an average of ${avgTax.toFixed(1)}% across these runs. Adjusted pace is the fitness signal — it's the only column comparable between a cool morning and a monsoon afternoon.</div>
+        <div class="note">Conditions have cost you an average of ${avgTax.toFixed(1)}% across these runs.${s.excludeStopped && totalStopped > 0 ? ` ${Math.round(totalStopped)}s of stopped time excluded in total.` : ''}</div>
+        ${state.paceMode === 'normalized' ? `<div class="estimate-note" style="margin-top:12px">${icon('alert', 13)} <span>Riegel normalization assumes comparable effort. It can't tell an easy long run from a hard short one${wideSpread ? `, and your runs range ${dMin.toFixed(1)}–${dMax.toFixed(1)} mi — a wide spread, so read this line loosely` : ''}.</span></div>` : ''}
         <div class="io-row">
           <button class="io-btn" id="export-btn">Export backup</button>
           <button class="io-btn" id="import-btn">Import backup</button>
@@ -844,7 +997,63 @@ function renderHistory() {
       if (confirm('Delete this run from your log?')) { removeFromLog(b.dataset.id); render(); }
     });
   });
+  document.querySelectorAll('.mode-btn').forEach((b) => {
+    b.addEventListener('click', () => { state.paceMode = b.dataset.mode; render(); });
+  });
   wireIO();
+}
+
+function renderSettings() {
+  const s = loadSettings();
+  const opts = [3.107, 5, 6.214, 10, 13.109, 26.219];
+  const labels = { 3.107: '5K', 5: '5 miles', 6.214: '10K', 10: '10 miles', 13.109: 'Half marathon', 26.219: 'Marathon' };
+  stageEl.innerHTML = `
+    <div class="result-card">
+      <div class="section">
+        <div class="section-title">Runner</div>
+        <label class="toggle-row">
+          <div>
+            <div class="toggle-label">Acclimatized to altitude</div>
+            <div class="toggle-sub">Turn on if you live and train at elevation. Two to three weeks at altitude recovers about half the performance loss, so a resident shouldn't be charged a visitor's penalty.</div>
+          </div>
+          <input type="checkbox" id="set-accl" ${s.acclimatized ? 'checked' : ''} />
+        </label>
+        <label class="toggle-row">
+          <div>
+            <div class="toggle-label">Exclude stopped time</div>
+            <div class="toggle-sub">Drops any stretch under 0.5 m/s — traffic lights, water stops — instead of counting it as slow running. Keeps trends from being polluted by red lights.</div>
+          </div>
+          <input type="checkbox" id="set-stop" ${s.excludeStopped ? 'checked' : ''} />
+        </label>
+      </div>
+      <div class="section">
+        <div class="section-title">Distance Normalization</div>
+        <div class="in-field" style="background:var(--surface-2)">
+          <span class="cond-key">Reference distance</span>
+          <select id="set-ref">
+            ${opts.map((o) => `<option value="${o}" ${Math.abs(o - s.refDistanceMi) < 0.01 ? 'selected' : ''}>${labels[o]}</option>`).join('')}
+          </select>
+        </div>
+        <div class="note">Uses Riegel's formula (T₂ = T₁ × (D₂/D₁)^1.06, published 1977) to convert every run to an equivalent effort at one distance, so a 3-miler and a 10-miler sit on the same trend line. Pick something near your typical run — the further a run is from the reference, the more extrapolation is involved.</div>
+        <div class="estimate-note" style="margin-top:12px">${icon('alert', 13)} <span>Riegel assumes a genuine race effort. It cannot distinguish effort level, so an easy long run will normalize to a flattering number. The 1.06 exponent is also a population average — roughly 1.04 for elites, 1.07–1.08 for newer runners.</span></div>
+      </div>
+      <div class="section">
+        <div class="note">Changing anything here recalculates your entire history — logged runs store raw conditions, not fixed results.</div>
+        <button class="apply-btn" id="set-save">Save settings</button>
+      </div>
+    </div>`;
+  document.getElementById('set-save').addEventListener('click', () => {
+    const next = {
+      acclimatized: document.getElementById('set-accl').checked,
+      excludeStopped: document.getElementById('set-stop').checked,
+      refDistanceMi: parseFloat(document.getElementById('set-ref').value) || 5,
+    };
+    saveSettings(next);
+    if (state.result) recompute();
+    const btn = document.getElementById('set-save');
+    btn.textContent = 'Saved ✓';
+    setTimeout(() => { state.view = 'history'; render(); }, 500);
+  });
 }
 
 function wireIO() {
@@ -870,6 +1079,7 @@ function render() {
   });
 
   if (state.view === 'history') { renderHistory(); return; }
+  if (state.view === 'settings') { renderSettings(); return; }
 
   if (state.stage === 'upload') {
     stageEl.innerHTML = `
@@ -896,18 +1106,20 @@ function render() {
   } else if (state.stage === 'done' && state.result) {
     const r = state.result;
     const distMiles = r.computed.totalDist / 1609.34;
-    const actualPaceSec = distMiles > 0 ? r.computed.totalTime / distMiles : 0;
+    const actualPaceSec = distMiles > 0 ? r.computed.movingTime / distMiles : 0;
     const adjustedPaceSec = distMiles > 0 ? r.computed.finalAdjustedTime / distMiles : 0;
     const chart = r.hasElevation ? elevationChartSVG(r.points) : '';
     const w = r.weather;
     const autoFailed = !r.auto.weather;
     const anyManual = Object.values(r.manual).some((v) => v != null);
+    const st = loadSettings();
+    const stoppedSec = Math.round(r.computed.stoppedTime || 0);
 
     const heatDetail = r.computed.wbgtC != null
       ? `WBGT ~${Math.round((r.computed.wbgtC * 9) / 5 + 32)}°F (${r.computed.wbgtC.toFixed(1)}°C) from ${Math.round(w.tempF)}°F / ${Math.round(w.rh)}% RH · ${r.computed.heatSensitivity.toFixed(1)}%/5°C at your pace`
       : 'Needs temp + humidity — enter below';
     const altDetail = w.elevationM != null
-      ? `~${Math.round(w.elevationM * 3.28084).toLocaleString()}′ elevation${r.hasElevation ? ' (from your file)' : ''}`
+      ? `~${Math.round(w.elevationM * 3.28084).toLocaleString()}′ elevation${r.hasElevation ? ' (from your file)' : ''}${st.acclimatized ? ' · acclimatized, penalty halved' : ' · assumes not acclimatized'}`
       : 'No elevation in file — enter below';
     const windDetail = w.windSpeedMph != null
       ? `${Math.round(w.windSpeedMph)} mph from the ${windDirLabel(w.windDirDeg)}`
@@ -926,13 +1138,15 @@ function render() {
           <div class="hero-label">Adjusted pace · ideal conditions</div>
           <div class="hero-number">${formatPace(adjustedPaceSec)}</div>
           <div class="hero-unit">min / mile</div>
-          <div class="hero-vs">actual pace was <b>${formatPace(actualPaceSec)}/mi</b> — equivalent effort was <b>${formatPct(r.computed.combinedMultiplier)}</b> harder than ideal</div>
+          <div class="hero-vs">${st.excludeStopped && stoppedSec > 0 ? 'moving' : 'actual'} pace was <b>${formatPace(actualPaceSec)}/mi</b> — equivalent effort was <b>${formatPct(r.computed.combinedMultiplier)}</b> harder than ideal</div>
+          ${r.computed.normalizedPaceSec != null ? `<div class="hero-vs" style="margin-top:8px">≈ <b>${formatPace(r.computed.normalizedPaceSec)}/mi</b> as a ${st.refDistanceMi}-mile effort <span style="opacity:.7">(Riegel)</span></div>` : ''}
         </div>
         <div class="stats-row">
           <div class="stat"><div class="stat-val">${distMiles.toFixed(2)}</div><div class="stat-key">Miles</div></div>
           <div class="stat"><div class="stat-val">${Math.round(r.gainFt)}′</div><div class="stat-key">Gain</div></div>
-          <div class="stat"><div class="stat-val">${formatDuration(r.computed.totalTime)}</div><div class="stat-key">Duration</div></div>
+          <div class="stat"><div class="stat-val">${formatDuration(r.computed.movingTime)}</div><div class="stat-key">${st.excludeStopped && stoppedSec > 0 ? 'Moving' : 'Duration'}</div></div>
         </div>
+        ${st.excludeStopped && stoppedSec > 0 ? `<div class="section" style="padding-top:14px;padding-bottom:14px"><div class="log-meta">${stoppedSec}s of stopped time excluded (elapsed was ${formatDuration(r.computed.elapsedTime)}) — worth ${((r.computed.elapsedTime - r.computed.movingTime) / Math.max(0.01, distMiles)).toFixed(0)} sec/mi.</div></div>` : ''}
         ${chart ? `<div class="section"><div class="section-title">Elevation Profile</div>${chart}</div>` : ''}
         <div class="section">
           <div class="section-title-row">
@@ -958,7 +1172,7 @@ function render() {
           </div>
           <button class="apply-btn" id="apply-btn">Apply conditions</button>
           ${(w.cloudCover != null && w.cloudCover >= 55 && r.computed.breakdown.heat > 1.001) ? `<div class="estimate-note">${icon('alert', 13)} <span>${Math.round(w.cloudCover)}% cloud cover${w.solarWm2 != null ? `, ${Math.round(w.solarWm2)} W/m² sun` : ''}. The WBGT formula assumes moderate sun, so the ${formatPct(r.computed.breakdown.heat)} heat figure is likely an overestimate — read it as a ceiling.</span></div>` : ''}
-          <div class="note">Grade uses the Minetti et al. (2002) cost curve and needs nothing but your file — it bottoms out around an 18% downhill and costs ~1.66× flat at a 10% climb. Altitude reads elevation straight from the track and maps it to empirical non-acclimated race-pace slowdown. Heat estimates WBGT from temperature and humidity (the Bureau of Meteorology / ACSM formula) and converts it to pace loss using Ely et al. (2007), scaled to your own pace since slower runners lose more. Caveat worth knowing: that WBGT formula assumes moderate sun and light wind — it overestimates heat stress on cloudy, windy, or early-morning runs. Wind resolves against your GPS heading segment-by-segment, so direction matters. Barometric pressure was evaluated but isn't included — day-to-day swings are physiologically negligible next to elevation.</div>
+          <div class="note">Grade uses the Minetti et al. (2002) cost curve and needs nothing but your file — it bottoms out around an 18% downhill and costs ~1.66× flat at a 10% climb. Altitude reads elevation straight from the track; the penalty is halved if you've marked yourself acclimatized in Settings. Heat estimates WBGT from temperature and humidity (the Bureau of Meteorology / ACSM formula) and converts it to pace loss using Ely et al. (2007), scaled to your own pace since slower runners lose more. Caveat worth knowing: that WBGT formula assumes moderate sun and light wind — it overestimates heat stress on cloudy, windy, or early-morning runs. Wind resolves against your GPS heading segment-by-segment, so direction matters. Stopped stretches under 0.5 m/s are removed rather than adjusted. Barometric pressure was evaluated but isn't included — day-to-day swings are physiologically negligible next to elevation.</div>
         </div>
         <div style="padding:0 24px 24px">
           <button class="save-btn" id="save-btn">${logHas(r.startTime.toISOString()) ? 'Saved to log ✓ — update' : 'Save to log'}</button>
@@ -989,7 +1203,7 @@ function recompute() {
   const { weather, pm25 } = mergedConditions(r);
   r.weather = weather;
   r.pm25 = pm25;
-  r.computed = computeAdjustedPace(r.segments, weather, pm25);
+  r.computed = computeAdjustedPace(r.segments, weather, pm25, loadSettings());
 }
 
 function applyManual() {
